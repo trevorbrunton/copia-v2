@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Auth pages that now redirect straight to /demo
-const AUTH_PAGES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
+// Auth pages that now redirect straight to /demo (landing page "/" is excluded)
+const AUTH_PAGES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
 
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

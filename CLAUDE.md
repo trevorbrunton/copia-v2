@@ -53,7 +53,12 @@ app/
 │       ├── user/account/   # DELETE self-service account deletion
 │       ├── user/sessions/  # GET/POST/DELETE sessions, [id] revoke/heartbeat
 │       ├── user/devices/   # GET devices, [id] remove device
-│       └── user/login-history/ # GET login history
+│       ├── user/login-history/ # GET login history
+│       └── demo/              # Investor demo API (unauthenticated)
+│           ├── chat/          # POST — Voiceflow RAG agent
+│           ├── tts/           # POST — ElevenLabs text-to-speech (streaming)
+│           └── avatar/        # POST — HeyGen streaming avatar (create/speak/close)
+├── demo/               # Public investor demo page (no auth)
 ├── layout.tsx          # Root layout with providers
 └── globals.css
 
@@ -73,6 +78,12 @@ components/
 ├── theme-toggle.tsx    # Dark/light toggle
 ├── providers.tsx       # QueryProvider + ThemeProvider
 ├── ui/                 # shadcn/ui components (incl. badge, breadcrumb)
+├── demo/               # Investor demo page components
+│   ├── demo-page.tsx   # Main layout (header + avatar + chat)
+│   ├── avatar-panel.tsx # Avatar placeholder with status indicator
+│   ├── chat-panel.tsx  # Message list with typing indicator
+│   ├── chat-input.tsx  # Text input + voice input (Web Speech API)
+│   └── error-banner.tsx # Dismissable error display
 └── settings/           # Settings tab components
     ├── profile-tab.tsx
     ├── security-tab.tsx
@@ -93,6 +104,15 @@ src/
 │   ├── index.ts        # Drizzle client (postgres-js)
 │   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory
 │   └── migrations/     # SQL migrations
+├── demo/               # Investor demo module (OC Mid-Cap Fund)
+│   ├── config.ts       # Persona, vendor API configs (Voiceflow, ElevenLabs, HeyGen)
+│   ├── types.ts        # ChatMessage, DemoStatus, AvatarSession, VoiceflowMessage
+│   ├── fetch-external.ts # Shared fetch helper for vendor APIs (timeout + error handling)
+│   ├── voiceflow-client.ts # Voiceflow General Runtime interaction
+│   ├── elevenlabs-client.ts # ElevenLabs TTS (streaming response)
+│   ├── heygen-client.ts # HeyGen streaming avatar session management
+│   ├── use-demo.ts     # useDemo hook (chat state machine + Voiceflow integration)
+│   └── index.ts        # Public API exports
 ├── hooks/
 │   ├── use-user.ts     # User profile + delete account (with cache invalidation)
 │   ├── use-sessions.ts # Sessions, devices, login history (with optimistic updates)
@@ -196,6 +216,16 @@ Use `@/*` to import from the project root.
 - `session-service.ts` handles sessions, devices, heartbeat, login history
 - Session heartbeat every 15 minutes; session TTL 30 days
 - `sessionId` persisted in `localStorage` for survival across page refreshes
+
+### Investor Demo (OC Mid-Cap Fund)
+- Public page at `/demo` — no auth required (added to `PUBLIC_ROUTES` in `proxy.ts`)
+- Architecture: User question → Voiceflow (RAG) → ElevenLabs (TTS) → HeyGen (avatar)
+- Three unauthenticated API routes under `/api/v1/demo/` (chat, tts, avatar)
+- Server-side vendor clients in `src/demo/` share `fetchExternal()` for timeout + error handling
+- Client-side `useDemo()` hook manages chat state via `useReducer`
+- OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
+- Web Speech API for voice input (Chrome/Edge); graceful degradation to text-only
+- Env vars: `VOICEFLOW_API_KEY`, `HEYGEN_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
 
 ## Environment Variables
 

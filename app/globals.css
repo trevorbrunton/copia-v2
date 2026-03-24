@@ -44,6 +44,14 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* OC Funds brand tokens (investor demo) */
+:root {
+  --oc-navy: #1a365d;
+  --oc-dark: #0f2440;
+  --oc-light-grey: #f7f8fa;
+  --oc-mid-grey: #e2e8f0;
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

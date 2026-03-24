@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConversation } from "@11labs/react";
 import { FALLBACK_MESSAGE } from "./config";
+import { classifyQuestion, PREGENERATED } from "./classifier";
 import type { ChatMessage, DemoStatus } from "./types";
 
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
@@ -24,7 +25,9 @@ export function useDemo() {
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isPlayingCached, setIsPlayingCached] = useState(false);
   const isConnectingRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const conversation = useConversation({
     onConnect: () => {
@@ -49,9 +52,13 @@ export function useDemo() {
     },
   });
 
-  // Clean up on unmount
+  // Cleanup audio on unmount
   useEffect(() => {
     return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       if (conversation.status === "connected") {
         conversation.endSession().catch(() => {});
       }
@@ -59,7 +66,35 @@ export function useDemo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Must be called from a user gesture (click) to satisfy browser autoplay policy
+  // Play a pre-generated audio file
+  const playCachedAudio = useCallback((audioUrl: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Stop any currently playing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsPlayingCached(false);
+        audioRef.current = null;
+        resolve();
+      };
+
+      audio.onerror = () => {
+        setIsPlayingCached(false);
+        audioRef.current = null;
+        reject(new Error("Audio playback failed"));
+      };
+
+      setIsPlayingCached(true);
+      audio.play().catch(reject);
+    });
+  }, []);
+
+  // Must be called from a user gesture to satisfy browser autoplay policy
   const connect = useCallback(async () => {
     if (isConnectingRef.current || conversation.status === "connected") return;
 
@@ -72,6 +107,15 @@ export function useDemo() {
     setError(null);
 
     try {
+      // Play greeting immediately from cache
+      const greeting = PREGENERATED.greeting;
+      setMessages((prev) => [
+        ...prev,
+        createMessage("assistant", greeting.text),
+      ]);
+      playCachedAudio(greeting.audioUrl).catch(() => {});
+
+      // Connect to ElevenLabs in background for fallback
       await conversation.startSession({
         agentId: AGENT_ID,
         connectionType: "webrtc",
@@ -83,16 +127,58 @@ export function useDemo() {
     } finally {
       isConnectingRef.current = false;
     }
-  }, [conversation]);
+  }, [conversation, playCachedAudio]);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || conversation.status !== "connected") return;
+      if (!trimmed) return;
 
       setMessages((prev) => [...prev, createMessage("user", trimmed)]);
       setIsProcessing(true);
       setError(null);
+
+      // Try to classify and use pre-generated response
+      const category = classifyQuestion(trimmed);
+
+      if (category) {
+        const cached = PREGENERATED[category];
+        if (cached) {
+          // Instant response — no agent round-trip
+          setMessages((prev) => [
+            ...prev,
+            createMessage("assistant", cached.text),
+          ]);
+          setIsProcessing(false);
+
+          // Mute live agent while playing cached audio
+          if (conversation.status === "connected") {
+            conversation.setVolume({ volume: 0 });
+          }
+
+          try {
+            await playCachedAudio(cached.audioUrl);
+          } catch {
+            // Audio failed — text is already shown, so not critical
+          }
+
+          // Restore live agent volume
+          if (conversation.status === "connected") {
+            conversation.setVolume({ volume: 1 });
+          }
+          return;
+        }
+      }
+
+      // No match — fall back to live ElevenLabs agent
+      if (conversation.status !== "connected") {
+        setMessages((prev) => [
+          ...prev,
+          createMessage("assistant", FALLBACK_MESSAGE),
+        ]);
+        setIsProcessing(false);
+        return;
+      }
 
       try {
         conversation.sendUserMessage(trimmed);
@@ -107,12 +193,12 @@ export function useDemo() {
         setIsProcessing(false);
       }
     },
-    [conversation]
+    [conversation, playCachedAudio]
   );
 
   const demoStatus: DemoStatus = isProcessing
     ? "processing"
-    : conversation.isSpeaking
+    : isPlayingCached || conversation.isSpeaking
       ? "speaking"
       : "ready";
 

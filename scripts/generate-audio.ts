@@ -34,7 +34,76 @@ const responses: Record<string, string> = {
     "That's a great question. For more detail on that topic, I'd suggest speaking directly with our investor relations team who can provide you with the most current and comprehensive information.",
 
   greeting:
-    "Hello, I'm Robert Frost, Head of Investments at OC Funds Management. How can I help you today?",
+    "Hello, I'm Robert Frost, Head of Investments at OC Funds Management. Welcome — I'm happy to answer any questions you have about the OC Mid-Cap Fund or our investment approach.",
+
+  fund_overview:
+    "The OC Mid-Cap Fund is a long-only, benchmark-unaware Australian equity strategy focused on high-quality, well-managed mid-cap stocks. We invest in twenty-five to fifty companies listed on the ASX, targeting the segment of the market that has produced superior investment returns over the past two decades. The fund launched in December 2024 as a registered managed investment scheme, though the strategy has been managed as a wholesale trust since November 2023.",
+
+  fund_details:
+    "The key details are as follows. The APIR code is OPS0472AU, and the ARSN is 679 449 293. The fund's inception date is the sixteenth of November 2023. The responsible entity is Copia Investment Partners Limited. The benchmark is the S and P ASX MidCap 50 Accumulation Index, and our objective is to outperform that benchmark by two percent per annum over rolling five-year periods, after fees and taxes.",
+
+  fees:
+    "Our management fee is zero point eight five percent per annum of the net asset value, inclusive of GST net of reduced input tax credits. The performance fee is fifteen point three seven five percent of any outperformance above the benchmark, subject to a high-water mark — so we only earn a performance fee when the fund's return is positive and above the previous high. There is also a buy-sell spread of plus or minus zero point two five percent when you invest or withdraw. There are no entry fees, exit fees, or contribution fees.",
+
+  minimum_investment:
+    "The minimum initial investment is twenty thousand dollars. Additional investments can be made at any time with a minimum of five thousand dollars. The minimum withdrawal amount is also five thousand dollars, and your account balance must remain at or above twenty thousand dollars.",
+
+  how_to_invest:
+    "You can invest directly by completing the online application form available on our website at ocfunds.com.au. You will need to read the Product Disclosure Statement and Target Market Determination first. Paper application forms are also available on request. Alternatively, you can access the fund through various investment platforms. Payment can be made by direct debit, EFT, or BPay. If you need any help, you can call Copia on 1800 442 129.",
+
+  distributions:
+    "The fund distributes net income and realised capital gains annually, usually within two months following the end of the financial year. You can choose to have distributions paid directly to your bank account or reinvested as additional units. If you don't nominate a preference, distributions will be automatically reinvested. Any franking credits or foreign tax credits will be distributed with the June payments.",
+
+  investment_universe:
+    "Our primary investment universe is companies in the S and P ASX MidCap 50 Index — essentially Australia's fifty-first to one-hundredth largest companies by market capitalisation. Up to twenty percent of the portfolio may also be invested in companies from the S and P ASX 50 Index, and likewise up to twenty percent in high-conviction companies outside the top one hundred. Many of these stocks have been part of our small-cap and micro-cap portfolios before they grew into larger companies, so they are well known to us.",
+
+  portfolio_holdings:
+    "I can share that the fund has historically held positions in quality companies such as CAR Group, REA Group, and Fisher and Paykel Healthcare. These are businesses that were long-term holdings in our small-cap strategies before they graduated to the mid-cap universe. We have previously owned forty-two of the fifty stocks currently in the ASX Mid-Cap Index through our other funds, so we have deep knowledge of these businesses.",
+
+  why_mid_caps:
+    "Mid-cap companies represent a sweet spot in the market. They have typically moved past the early-stage risks of smaller companies — they tend to be more established and financially stable — yet they still offer significant growth potential with greater flexibility than mature large-cap companies. Historically, the S and P ASX MidCap 50 Index has outperformed both the large-cap ASX 50 and the Small Ordinaries over three, five, seven, and ten-year periods. Despite this track record, mid-caps typically only represent around fifteen percent of an investor's broad-based portfolio, which means many investors are underweight this attractive segment.",
+
+  risk_management:
+    "Risk management is central to our process. We employ a top-down macro risk overlay through our proven OC Risk Management Committee, which is applied across all OC funds. We screen out complex or speculative businesses from our investment process. The portfolio is concentrated at twenty-five to fifty stocks, which means each holding is high conviction, but we maintain flexible cash weightings of up to twenty percent to manage downside risk. We also limit our funds under management to a maximum of one percent of the S and P ASX MidCap 50 Index to ensure we maintain transactional flexibility.",
+
+  about_oc:
+    "OC Funds Management was established in the year 2000 and is a boutique investment manager specialising in Australian mid, small, and micro-cap equities. We are led by a long-standing team of six specialist investors who together combine over one hundred years of investment management experience. Copia Investment Partners is our exclusive distribution partner and also serves as the responsible entity for our funds. We are proud to be a signatory to the United Nations-supported Principles for Responsible Investment.",
+
+  team_overview:
+    "Our team of six includes myself, Robert Frost, as Head of Investments. Nga Lucas is the Portfolio Manager for the Mid-Cap Fund, bringing over two decades of experience including a decade at AFIC. Robert Calnon and Stephen Evans are Portfolio Managers who have been with OC since 2007 and 2004 respectively. Aaron Yeoh is a Senior Investment Analyst who joined from Cooper Investors in 2022, and Daniel Stein is a Senior Investment Analyst who covers financial modelling and Australian small and micro-cap research.",
+
+  nga_lucas:
+    "Nga Lucas joined OC Funds Management in 2024 as Portfolio Manager for the Mid-Cap Fund. She has responsibility for the construction, stock selection, and performance of the mid-cap portfolio. Prior to joining OC, Nga worked at the Australian Foundation Investment Company, known as AFIC, for over a decade as a Senior Investment Analyst specialising in technology, telecommunications, industrial, and small companies. Before AFIC, she spent ten years on the sell side as a Research Analyst at Goldman Sachs and HSBC.",
+
+  ratings:
+    "The OC Mid-Cap Fund has received a Highly Recommended rating from Lonsec and a Recommended rating from Zenith. These are independent research ratings that assess the fund's investment process, team, and overall quality. Our Premium Small Companies Fund also won the 2024 Money Management Fund Manager of the Year Award in the Australian Small Cap Equity category, which speaks to the broader capability of the OC team.",
+
+  esg:
+    "OC Funds Management is a signatory to the United Nations-supported Principles for Responsible Investment. While the responsible entity does not take ESG considerations into account in making investment decisions, the investment manager — that is, our team — may at our discretion take environmental, social, and governance factors into account where we believe they are relevant to the financial performance of an investment. We do not have a predetermined view on ESG, but we integrate these considerations as part of our broader fundamental analysis.",
+
+  other_funds:
+    "In addition to the Mid-Cap Fund, OC manages three other strategies. The OC Premium Small Companies Fund invests in small to mid-cap Australian listed companies outside the S and P ASX 100, with around seven hundred and sixty-eight million dollars in assets. The OC Micro-Cap Fund focuses on companies with a market capitalisation below five hundred million dollars at purchase. And the OC Dynamic Equity Fund provides a more flexible approach. All of our funds have been ranked in the top quartile of their peer group over five years.",
+
+  copia:
+    "Copia Investment Partners is our responsible entity and exclusive distribution partner. Copia was originally formed in 2000 as part of Opis Capital, and rebranded to Copia Investment Partners in 2014. They are independently owned with offices in Melbourne, Sydney, and Brisbane. Copia undertakes distribution, marketing, compliance, and operations support, which allows our investment team to focus entirely on managing money for clients. Their contact details are 1800 442 129 or clientservices at copiapartners.com.au.",
+
+  mlc_mandate:
+    "MLC Asset Management appointed OC Funds Management to manage over five hundred million dollars in the OC Mid-Cap strategy. This was a significant endorsement of our investment capabilities and the mid-cap opportunity. It reflects the strong demand we have seen from institutional investors for a quality, active mid-cap strategy managed by a team with deep experience in this segment of the market.",
+
+  withdrawal:
+    "You can withdraw all or part of your investment at any time by completing a withdrawal request form, available on our website or by calling Copia on 1800 442 129. The minimum withdrawal is five thousand dollars. If your request is received by 2pm AEST on a business day, it will generally be processed at that day's exit price. Withdrawal proceeds are usually paid to your nominated bank account within ten business days.",
+
+  cooling_off:
+    "Yes, retail investors have a fourteen-day cooling-off period after making an application. This begins from the earlier of receiving your investment confirmation or the end of the fifth business day after units are issued. If you cancel during this period, the amount repaid will be adjusted for market movements, administration costs, and any applicable taxes. Investments made through distribution reinvestment are not subject to cooling off.",
+
+  tax:
+    "The fund has elected to be an Attribution Managed Investment Trust, or AMIT. This means the fund itself does not pay tax — instead, all taxable income, including net capital gains, is attributed to investors each year on an AMIT Member Annual statement. You include your share of the fund's net taxable income in your own tax return. I would strongly recommend speaking with your tax adviser about your specific circumstances, as tax laws are complex.",
+
+  contact:
+    "You can reach Copia Investment Partners, our responsible entity, on their free call number 1800 442 129. By email at clientservices at copiapartners.com.au. Or by post at Level 47, North Tower, 80 Collins Street, Melbourne, Victoria 3000. For complaints, you can also contact the Australian Financial Complaints Authority on 1800 931 678.",
+
+  active_vs_passive:
+    "We believe active management is particularly well suited to the mid-cap and small-cap segments of the market. Research shows that active managers have clear dominance in the Australian small and mid-cap category, supported by their ability to exploit pricing inefficiencies in relatively under-researched segments. The median Australian small-cap active fund has outperformed the index by one point eight percentage points over three years, two point two over five years, and three point three over ten years, after fees. Our benchmark-unaware approach allows us to invest based purely on conviction rather than index weight.",
 };
 
 async function generateAudio(category: string, text: string): Promise<void> {

@@ -84,6 +84,35 @@ export const userSessions = pgTable("user_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+// ─── Demo Responses ─────────────────────────────────────────
+// Pre-produced answers for the avatar demo. Each response has a
+// category (e.g. "fund_manager"), a scripted answer text, and an
+// optional URL to a pre-generated ElevenLabs audio file.
+export const demoResponses = pgTable("demo_responses", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  category: text("category").notNull().unique(),
+  label: text("label").notNull(),
+  answerText: text("answer_text").notNull(),
+  audioUrl: text("audio_url"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ─── Demo Question Patterns ─────────────────────────────────
+// Variant phrasings that map to a demo response. The voice agent
+// uses these to classify an incoming question and select the
+// matching pre-produced answer.
+export const demoQuestionPatterns = pgTable("demo_question_patterns", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  responseId: uuid("response_id")
+    .notNull()
+    .references(() => demoResponses.id, { onDelete: "cascade" }),
+  pattern: text("pattern").notNull(),
+  isCanonical: integer("is_canonical").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 // ─── Types ──────────────────────────────────────────────────
 export const deviceTypes = ["desktop", "mobile", "tablet"] as const;
 export type DeviceType = (typeof deviceTypes)[number];
@@ -96,3 +125,7 @@ export type UserDevice = typeof userDevices.$inferSelect;
 export type NewUserDevice = typeof userDevices.$inferInsert;
 export type UserSession = typeof userSessions.$inferSelect;
 export type NewUserSession = typeof userSessions.$inferInsert;
+export type DemoResponse = typeof demoResponses.$inferSelect;
+export type NewDemoResponse = typeof demoResponses.$inferInsert;
+export type DemoQuestionPattern = typeof demoQuestionPatterns.$inferSelect;
+export type NewDemoQuestionPattern = typeof demoQuestionPatterns.$inferInsert;

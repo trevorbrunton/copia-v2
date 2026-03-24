@@ -2,7 +2,7 @@ import { createMiddlewareSupabase } from "@/src/lib/supabase/middleware";
 import { NextRequest, NextResponse } from "next/server";
 
 // Routes accessible without authentication
-const PUBLIC_ROUTES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
+const PUBLIC_ROUTES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify", "/demo"];
 // Auth pages that redirect to /dashboard if user is already logged in
 const AUTH_PAGES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
 

@@ -1,41 +1,62 @@
 # Copia / OC Mid-Cap Fund — Investor Agent Demo Plan
 
 **Created:** 24 March 2026
-**Updated:** 24 March 2026 (v3 — realistic build plan)
+**Updated:** 25 March 2026 (v4 — aligned with ARCHITECTURE.md)
 **Owner:** Rosie
 **Builder:** Trevor (code by Claude Code) + Trevor (manual platform setup)
 **Internal review:** Friday 28 March 2026
 **Client demo:** Wednesday 1 April 2026
 **Hour cap:** 20–30 hrs (check in with Rosie before exceeding)
 
----
-
-## How This Build Works
-
-**Two parallel tracks:**
-
-| Track | Who | What |
-|-------|-----|------|
-| **Track A: Code** | Claude Code | Frontend, API integration, HeyGen streaming, deployment |
-| **Track B: Platform setup** | Trevor (manual) | ElevenLabs dashboard (agent, KB, voice, prompt), HeyGen dashboard (avatar creation), Base44 investigation, testing/QA |
-| **Track C: Base44** | Trevor (parallel) | Investigate and build on Base44 as alternative path to BetaShares-quality demo |
-
-Claude Code cannot create accounts, upload PDFs, select voices, test audio/video quality, or see the demo output. Every integration touchpoint requires Trevor to provide IDs, test results, and feedback.
-
-**The feedback loop:** Claude writes code → Trevor runs it → Trevor reports what happened → Claude adjusts. Budget for this — it's slower than solo coding.
+**Reference:** [ARCHITECTURE.md](../ARCHITECTURE.md) · [INFRASTRUCTURE.md](../INFRASTRUCTURE.md)
 
 ---
 
-## Strategy: Two Horses
+## Architecture Summary
 
-We're running two approaches in parallel:
+Three ElevenLabs + LiveAvatar services, orchestrated by the app:
 
-1. **ElevenLabs + HeyGen custom build** (this plan) — Claude codes the frontend and integration, Trevor sets up the platforms
-2. **Base44 no-code build** (Track C) — Trevor builds directly on Base44, the same platform the BetaShares demo uses
+```
+User types question
+    │
+    ▼
+ElevenLabs Agent (NLU only, no audio)
+    │
+    ├── Known intent → pre-rendered PCM audio → LiveAvatar lip-syncs
+    │
+    └── Unknown intent → ElevenLabs TTS API (runtime PCM) → LiveAvatar lip-syncs
+```
 
-**Why both:** The BetaShares demo was built on Base44 in likely a few hours. If Base44 can replicate that quality quickly, it's the faster path. But if Base44 has limitations (customisation, branding, avatar quality), the custom build gives us full control.
+- **ElevenLabs Conversational AI** — intent classification + RAG (text only, no voice output)
+- **ElevenLabs TTS API** — voice synthesis in PCM 24kHz format (offline for known answers, runtime for unknown)
+- **LiveAvatar LITE** — avatar video with lip-sync driven by `session.repeatAudio(pcmData)`
 
-**Decision gate — end of Day 1:** Compare progress on both tracks. Ship whichever is better by Friday.
+All audio uses the same custom ElevenLabs voice. LiveAvatar's built-in TTS is bypassed for voice consistency. See [ARCHITECTURE.md](../ARCHITECTURE.md) for full process flows.
+
+---
+
+## Current Status (25 March 2026)
+
+### What's Working
+- ✅ ElevenLabs agent configured and responding (NLU + RAG)
+- ✅ Branded demo page at `/demo` (no auth required)
+- ✅ Pre-generated MP3 audio for 7 core responses (greeting + 5 questions + fallback)
+- ✅ Client-side keyword classifier for instant cached responses
+- ✅ Live agent fallback for unknown questions (WebRTC voice output)
+- ✅ Chat transcript panel with typing indicators
+- ✅ 28 extended Q&A pairs mined from fund documents (migration 003)
+- ✅ Fund PDFs downloaded and text-extracted in `docs/fund-data/`
+
+### What Needs Doing
+- 🔴 **LiveAvatar credits** — Essential plan ($99/mo) requested, awaiting activation
+- 🔲 Convert audio from MP3 to PCM 24kHz format (LiveAvatar requirement)
+- 🔲 Regenerate audio for all 28 extended responses (currently only 7)
+- 🔲 Switch ElevenLabs agent to NLU-only mode (disable WebRTC audio output)
+- 🔲 Add ElevenLabs TTS API route for runtime voice synthesis (unknown questions)
+- 🔲 Integrate LiveAvatar SDK — session, video stream, `repeatAudio()`
+- 🔲 Update classifier to use ElevenLabs agent for intent classification
+- 🔲 Pre-recorded backup video of all 5 demo questions
+- 🔲 Custom voice clone (if Robert Frost audio available) or select stock voice
 
 ---
 
@@ -43,11 +64,10 @@ We're running two approaches in parallel:
 
 | # | Question | Impact | Status |
 |---|----------|--------|--------|
-| 1 | 🔴 **Tool accounts** — Need HeyGen API key + ElevenLabs API key to start coding. | Blocks all code work | ❓ |
-| 2 | 🟡 **Base44 account** — Can Trevor sign up and build on Base44 in parallel? | Track C viability | ❓ |
-| 3 | 🟡 **ElevenLabs access from Pep** — Existing 11Labs environment behind BetaShares demo. | Could shortcut voice + agent setup | ❓ |
-| 4 | 🟡 **Robert Frost audio/video** — Needed for voice cloning. Stock voice if unavailable. | Voice quality | ❓ |
-| 5 | Resolved: **PDF #5 (HSBC fund)** — Excluded. Different fund. | | Exclude |
+| 1 | 🔴 **LiveAvatar Essential plan** — Has it been activated? | Blocks avatar integration | Requested |
+| 2 | 🟡 **Robert Frost audio** — Any source for voice cloning? | Voice quality | Using stock voice |
+| 3 | 🟡 **Base44** — Was it investigated as an alternative? | Parallel path | Unknown |
+| 4 | 🟡 **LiveAvatar secrets API** — Can we register ElevenLabs key? (Needed for ElevenLabs Agent Plugin as alternative approach) | Simpler integration path | Blocked by `user_read` permission |
 
 ---
 
@@ -55,224 +75,109 @@ We're running two approaches in parallel:
 
 By **Friday 28 March** (internal review):
 
-**Target (Outcome B — talking avatar):**
-- [ ] Shareable demo link — no login required
-- [ ] Robert Frost avatar (HeyGen) speaks answers with lip-sync
-- [ ] ElevenLabs agent answers all 5 questions accurately
-- [ ] Fallback for out-of-scope questions
-- [ ] OC Funds branding (navy/grey, clean, minimal)
-- [ ] Pre-recorded backup video of all 5 questions
-- [ ] Documentation (Notion or markdown)
-
-**Guaranteed floor (Outcome A — audio-only):**
-- [ ] Shareable demo link
-- [ ] ElevenLabs Conversational AI widget embedded on branded page
-- [ ] Robert Frost's photo (static) with voice conversation
-- [ ] All 5 questions answered accurately
-- [ ] This ships no matter what — it's the safety net
+| # | Deliverable | Priority | Status |
+|---|-------------|----------|--------|
+| 1 | Shareable demo link — no login required | Must have | ✅ Done |
+| 2 | Agent answers all 5 demo questions accurately | Must have | ✅ Done |
+| 3 | Pre-generated audio for instant responses | Must have | ✅ Done (MP3, needs PCM conversion) |
+| 4 | Fallback for out-of-scope questions | Must have | ✅ Done |
+| 5 | OC Funds branding (navy/grey, clean) | Must have | ✅ Done |
+| 6 | LiveAvatar talking avatar with lip-sync | Should have | 🔴 Blocked on credits |
+| 7 | Runtime TTS for unknown questions via avatar | Should have | 🔲 Not started |
+| 8 | Pre-recorded backup video | Should have | 🔲 Not started |
+| 9 | Documentation | Must have | ✅ Done (ARCHITECTURE.md + INFRASTRUCTURE.md) |
 
 ---
 
-## Architecture
+## Phased Plan (Remaining Work)
 
-### Outcome B (target): Talking avatar
+### Phase A: Audio Pipeline (Pre-req for Avatar)
 
-```
-User (browser)
-    │
-    ▼
-┌──────────────────────────────────┐
-│   Frontend (demo/)               │  OC Funds branded page
-│   Deployed to Vercel             │  Hosted in this repo
-└──────────┬───────────────────────┘
-           │
-     ┌─────┴──────┐
-     │ Voice in   │  Browser captures mic audio
-     └─────┬──────┘
-           │ audio stream
-           ▼
-┌──────────────────────────────────┐
-│   ElevenLabs Conversational AI   │  Agent + RAG + TTS
-│   • Knowledge base (fund PDFs)   │  Processes question
-│   • System prompt (Robert Frost) │  Returns audio response
-│   • Voice (cloned or stock)      │
-└──────────┬───────────────────────┘
-           │ response audio chunks
-           ▼
-┌──────────────────────────────────┐
-│   HeyGen Interactive Avatar      │  WebSocket session
-│   • Robert Frost photo avatar    │  Receives audio
-│   • Lip-sync + head movement     │  Returns video stream
-└──────────┬───────────────────────┘
-           │ video stream (WebRTC)
-           ▼
-        Browser renders video
-        User sees Robert Frost
-        speaking the answer
-```
+**Goal:** Convert audio to PCM format and generate all 28 responses.
 
-**Latency stack (honest estimate):**
-- User finishes speaking → ElevenLabs processes: 1–3s
-- ElevenLabs generates audio → pipe to HeyGen: 0.5–1s
-- HeyGen generates lip-sync video: 1–2s
-- **Total: 3–6 seconds** before avatar starts speaking
+| Task | Est | Who | Notes |
+|------|-----|-----|-------|
+| Update `generate-audio.ts` to output PCM 24kHz format | 0.5h | Claude | `output_format: "pcm_24000"` instead of `mp3_44100_128` |
+| Generate PCM audio for all 28 response categories | 0.5h | Claude | Run script, output to `public/audio/*.pcm` |
+| Update classifier with all 28 categories + keywords | 1h | Claude | Extend from 5 to 28 categories |
+| Add `ELEVENLABS_VOICE_ID` env var | 0.25h | Claude | For TTS API calls |
+| Build TTS API proxy route (`/api/v1/demo/tts`) | 1h | Claude | Server-side: receives text → calls ElevenLabs TTS → returns PCM stream |
 
-This is acceptable for a demo. Not instant, but natural enough.
-
-### Outcome A (floor): Audio-only
-
-```
-User (browser)
-    │
-    ▼
-┌──────────────────────────────────┐
-│   Frontend (demo/)               │  OC Funds branded page
-│   Robert Frost photo (static)    │  ElevenLabs widget embedded
-└──────────┬───────────────────────┘
-           │
-           ▼
-┌──────────────────────────────────┐
-│   ElevenLabs Conversational AI   │  Handles everything:
-│   Built-in widget                │  mic capture, RAG, voice response
-└──────────────────────────────────┘
-```
-
-Much simpler. Widget handles all the audio plumbing. Claude codes a branded page around it.
+**Exit criteria:** All 28 answers available as PCM files. TTS route works for runtime generation.
 
 ---
 
-## Phased Plan
+### Phase B: LiveAvatar Integration (Blocked on Credits)
 
-### Phase 1: Setup & Outcome A (Day 1 — Tue 25 Mar)
+**Goal:** Avatar video with lip-sync driven by PCM audio.
 
-**Goal:** Audio-only demo working by end of Day 1. This is the safety net.
+| Task | Est | Who | Depends on |
+|------|-----|-----|------------|
+| Install `@heygen/liveavatar-web-sdk` | 0.25h | Claude | — |
+| Build `useAvatar()` hook — session lifecycle, video attach, repeatAudio | 2h | Claude | — |
+| Update `/api/v1/demo/avatar` route — session token creation | 0.5h | Claude | — |
+| Update `AvatarPanel` — render `<video>` element from LiveAvatar stream | 1h | Claude | — |
+| Update `useDemo()` — orchestrate NLU + PCM audio + avatar | 2h | Claude | Phase A complete |
+| Switch ElevenLabs agent to NLU-only (set `text_only: true`) | 0.25h | Claude | API call |
+| Mute WebRTC audio output (avatar handles all audio) | 0.25h | Claude | — |
+| Wire known questions: classifier → PCM file → `repeatAudio()` | 1h | Claude | Phase A |
+| Wire unknown questions: agent response → TTS API → PCM → `repeatAudio()` | 1.5h | Claude | TTS route |
+| Wire greeting: PCM greeting → `repeatAudio()` on session start | 0.5h | Claude | — |
 
-#### Track A — Claude Code (code)
-
-| Task | Est | Depends on |
-|------|-----|------------|
-| Create `demo/` directory with project structure | 0.5h | Nothing |
-| Build branded frontend page — OC Funds colours, Robert Frost photo, clean layout | 2h | Nothing |
-| Integrate ElevenLabs Conversational AI widget embed | 1h | Trevor provides: agent ID or widget embed code |
-| Add text input fallback for when mic is denied | 0.5h | Widget working |
-| Deploy to Vercel, get shareable URL | 0.5h | Frontend built |
-
-#### Track B — Trevor (manual platform setup)
-
-| Task | Est | Notes |
-|------|-----|-------|
-| Create/access ElevenLabs account, get API key | 0.5h | Share API key + agent ID with Claude |
-| Create Conversational AI agent in ElevenLabs dashboard | 0.5h | |
-| Upload PDFs to knowledge base (exclude PDF #5) | 0.5h | Main fund page + Latest Fund Report first, then remaining 3 |
-| Configure system prompt (use guidance from this doc) | 0.5h | |
-| Select or clone voice | 0.5h | Clone if audio available, stock Australian male otherwise |
-| Test all 5 questions in ElevenLabs dashboard — verify accuracy | 1h | Use verification checklist below |
-| Create/access HeyGen account, get API key | 0.5h | Share API key with Claude |
-| Upload Robert Frost photo, create avatar in HeyGen dashboard | 1h | Try multiple photos if first is poor quality |
-
-#### Track C — Trevor (Base44 parallel)
-
-| Task | Est | Notes |
-|------|-----|-------|
-| Sign up for Base44, explore platform | 1h | This is what BetaShares demo uses |
-| Attempt to build equivalent demo on Base44 | 2h | If viable, could be the primary deliverable |
-
-**Day 1 exit criteria:**
-- Outcome A (audio-only) is live on a shareable URL
-- ElevenLabs agent passes verification checklist
-- HeyGen avatar created and API key available
-- Base44 viability assessed
-- **Decision: which track is ahead? Adjust Day 2 accordingly.**
+**Exit criteria:** Avatar speaks all responses with lip-sync. Voice is consistent (same custom voice throughout).
 
 ---
 
-### Phase 2: Avatar Integration — Outcome B (Day 2 — Wed 26 Mar)
+### Phase C: Testing & Polish
 
-**Goal:** HeyGen avatar speaking ElevenLabs responses in the browser.
+**Goal:** Demo is reliable for client meeting.
 
-This is the hardest day. The integration between ElevenLabs audio output and HeyGen avatar input is the crux of the build.
-
-#### Track A — Claude Code
-
-| Task | Est | Depends on |
-|------|-----|------------|
-| Write HeyGen Interactive Avatar SDK integration — session creation, WebSocket setup | 2h | Trevor provides: API key, avatar ID |
-| Write audio pipeline — capture ElevenLabs response audio, pipe to HeyGen | 3h | ElevenLabs agent working (from Day 1) |
-| Render HeyGen video stream in frontend (WebRTC) | 1.5h | HeyGen session working |
-| Handle session lifecycle — start, stop, reconnect, error states | 1h | |
-| Loading states — show "thinking..." while avatar processes | 0.5h | |
-
-#### Track B — Trevor (testing + feedback)
-
-| Task | Est | Notes |
-|------|-----|-------|
-| Run the page locally after each Claude Code change | Ongoing | Report: does the avatar appear? Does it speak? What's the latency? Any errors in console? |
-| Test avatar quality — does it look like Robert Frost? | 0.5h | If poor, try different HeyGen avatar settings |
-| Test voice + lip-sync quality | 0.5h | Report any mismatch or uncanny valley issues |
-| Test latency — time from question end to avatar speaking | 0.5h | Target: <6 seconds |
-
-**Day 2 exit criteria:**
-- Avatar appears in the browser and lip-syncs to ElevenLabs audio
-- End-to-end flow works: speak question → hear + see Robert Frost answer
-- Latency is acceptable (<6 seconds)
-- OR: clear understanding of what's blocking and whether it's fixable in Day 3
-
-**If avatar integration is not working by end of Day 2:** Ship Outcome A. Spend Day 3 on polish instead of debugging. The audio-only demo is still a strong demo.
+| Task | Est | Who | Notes |
+|------|-----|-----|-------|
+| Test all 5 demo questions — verify avatar speaks correctly | 1h | Trevor | Use verification checklist |
+| Test unknown questions — verify runtime TTS + avatar | 0.5h | Trevor | |
+| Test fallback — out-of-scope questions | 0.5h | Trevor | |
+| Test edge cases: rapid questions, silence, interruption | 0.5h | Trevor | |
+| Optimise latency — target <2s for known, <5s for unknown | 0.5h | Claude | |
+| Record backup video (screen capture of 5 demo questions) | 0.5h | Trevor | OBS or similar |
+| Cross-browser test (Chrome, Safari) | 0.5h | Trevor | |
+| Mobile hotspot test (restricted network) | 0.25h | Trevor | |
+| Internal review with Rosie + Gio | 1h | Trevor | Fri 28 Mar |
+| Fix review feedback | 1h | Claude | |
 
 ---
 
-### Phase 3: Polish, QA & Backup (Day 3 — Thu 27 Mar)
+### Phase D: Voice Clone (Optional Enhancement)
 
-**Goal:** Demo is reliable, polished, and has a backup plan.
+**Goal:** Avatar sounds like Robert Frost, not a stock voice.
 
-#### Track A — Claude Code
-
-| Task | Est | Depends on |
-|------|-----|------------|
-| Fix any issues from Day 2 avatar integration | 2h | Trevor's feedback from testing |
-| Polish frontend — loading states, error recovery, reconnect button | 1h | |
-| Add connection status indicator (connected / reconnecting / error) | 0.5h | |
-| Handle mic permission denied gracefully — show text input prominently | 0.5h | |
-| Final cross-browser CSS fixes | 0.5h | Trevor tests Chrome + Safari |
-| Prepare production deployment on Vercel | 0.5h | |
-
-#### Track B — Trevor (QA + backup)
-
-| Task | Est | Notes |
-|------|-----|-------|
-| Run verification checklist 3x — check answer consistency | 1h | All 5 questions, 3 runs each |
-| Test trick questions (see checklist below) | 0.5h | Must not hallucinate |
-| Test off-topic questions | 0.5h | "What's the weather?" etc |
-| Test on mobile hotspot (simulates corporate network) | 0.5h | WebSocket connections may be blocked |
-| Test with mic permission denied — verify text fallback works | 0.5h | |
-| **Record backup video** — screen capture all 5 questions | 0.5h | OBS or similar. Safety net for demo day. |
-| Share backup video with Rosie | 0.25h | |
-
-**Day 3 exit criteria:**
-- Demo is stable — no crashes across 3 full test runs
-- Verification checklist passes 3/3
-- Backup video recorded and shared
-- Production URL is live and shareable
+| Task | Est | Who | Notes |
+|------|-----|-----|-------|
+| Source Robert Frost audio (podcast, interview, conference) | 1h | Trevor | Need ~1 min clean speech |
+| Create voice clone in ElevenLabs dashboard | 0.5h | Trevor | |
+| Update `ELEVENLABS_VOICE_ID` env var | 0.1h | Claude | |
+| Regenerate all 28 PCM audio files with cloned voice | 0.5h | Claude | Run script |
+| Test voice quality | 0.5h | Trevor | |
 
 ---
 
-### Day 4: Internal Review (Fri 28 Mar)
+## Hour Budget
 
-| Task | Est | Who |
-|------|-----|-----|
-| Live walkthrough with Rosie and Gio | 1h | Trevor presents |
-| Fix any issues flagged in review | 1–2h | Claude Code |
-| Final deployment | 0.5h | Claude Code |
+| Phase | Hours | Cumulative | Status |
+|-------|-------|------------|--------|
+| Previous work (Phases 1–3 from v3 plan) | ~16 | 16 | ✅ Complete |
+| A. Audio Pipeline | 3.25 | 19.25 | 🔲 Ready to start |
+| B. LiveAvatar Integration | 8.25 | 27.5 | 🔴 Blocked on credits |
+| C. Testing & Polish | 6.25 | 33.75 | 🔲 After B |
+| D. Voice Clone (optional) | 2.6 | 36.35 | 🟡 If audio available |
 
-### Day 5: Buffer (Mon 31 Mar)
-
-Reserved for anything that comes out of Friday's review.
+**Note:** Budget exceeds the original 20–30 hour cap. Phase D is optional. Check in with Rosie before proceeding beyond 30 hours.
 
 ---
 
 ## Verification Checklist
 
-Run after every knowledge base change. All must pass.
+Run after avatar integration. All must pass.
 
 | # | Question | Expected Key Facts | Pass? |
 |---|----------|-------------------|-------|
@@ -280,37 +185,15 @@ Run after every knowledge base change. All must pass.
 | 2 | What is the investment strategy? | Long-only, benchmark unaware, Australian equity, 20–50 mid-cap stocks, bottom-up | |
 | 3 | Rate of return since inception? | +9.4% (inception November 2023, to Feb 2026) | |
 | 4 | Year-to-date / recent performance? | -2.5% (1 month), -4.4% (3 months), +1.8% (1 year) | |
-| 5 | How does performance compare to benchmark? | S&P/ASX MidCap 50 Index. Fund is -6.9% vs benchmark since inception. Should contextualise (young fund, short track record). | |
+| 5 | How does performance compare to benchmark? | S&P/ASX MidCap 50 Index. Fund is -6.9% vs benchmark since inception. Contextualise. | |
 
 **Trick questions (must not hallucinate):**
 
 | Question | Expected Behaviour |
 |----------|-------------------|
 | "What's the fund's 5-year return?" | Decline — fund is only ~2 years old |
-| "Is this fund better than Vanguard?" | Decline — cannot compare to funds outside knowledge base |
-| "What's the current share price?" | Decline — not in the documents, suggest contacting IR team |
-| "What will the fund return next year?" | Decline — never forecast or speculate |
-
----
-
-## System Prompt
-
-For ElevenLabs Conversational AI agent configuration:
-
-```
-You are Robert Frost, Head of Investments at OC Funds Management.
-You are speaking with investors about the OC Mid-Cap Fund.
-Answer questions using only the provided fund documents.
-Be professional, measured, and confident.
-If a question asks about performance, always cite the specific time period.
-When comparing to the benchmark (S&P/ASX MidCap 50 Index), acknowledge
-underperformance factually and contextualise it: the fund is young
-(inception November 2023) with a short track record.
-Never invent or estimate numbers. If the data is not in your documents,
-say so and suggest contacting the investor relations team.
-Keep answers concise — 2-3 sentences for simple questions, up to 5 for
-benchmark comparison. You are speaking aloud, not writing an essay.
-```
+| "Is this fund better than Vanguard?" | Decline — cannot compare |
+| "What will the fund return next year?" | Decline — never forecast |
 
 ---
 
@@ -318,15 +201,13 @@ benchmark comparison. You are speaking aloud, not writing an essay.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| **ElevenLabs → HeyGen audio piping doesn't work** | Medium | High | This is the core technical risk. Fallback: ship Outcome A (audio-only). Day 2 is the make-or-break day. |
-| **Latency >10 seconds** (unacceptable for demo) | Medium | High | Reduce avatar quality settings. Try chunked audio streaming. Fallback: Outcome A. |
-| **HeyGen avatar looks uncanny / low quality** | Medium | Medium | Try multiple photos. Try HeyGen stock avatar. Fallback: Outcome A (static photo). |
-| **Voice cloning fails** | Medium | Low | Use stock Australian male voice. Still sounds professional. |
-| **PDF tables don't parse** | Medium | High | Manually add key numbers as structured text in knowledge base. |
-| **RAG hallucinates numbers** | Low | Critical | System prompt explicitly forbids it. Verification checklist after every KB change. |
-| **Demo fails on demo day** | Low | Critical | Pre-recorded backup video. Tested on mobile hotspot to simulate restricted network. |
-| **Mic blocked in meeting room** | Medium | Medium | Text input always visible. Backup video available. |
-| **Base44 turns out to be better** | Medium | Positive | Ship the Base44 version instead. This is a good outcome. |
+| **LiveAvatar credits not activated in time** | Medium | High | Ship audio-only Outcome A (working today). Avatar is additive. |
+| **PCM audio format issues with LiveAvatar** | Low | High | Test with a single file first before generating all 28. |
+| **Runtime TTS latency >5 seconds** | Medium | Medium | Pre-generate more answers to cover common questions. Expand from 7 to 28. |
+| **Voice clone quality poor** | Medium | Low | Use stock voice — still professional. |
+| **Demo fails on demo day** | Low | Critical | Pre-recorded backup video. Text chat always works. |
+| **LiveAvatar session drops mid-demo** | Low | High | Audio-only fallback. Reconnect button. |
+| **Budget exceeds 30 hours** | High | Medium | Phase D is optional. Check in with Rosie at 30 hours. |
 
 ---
 
@@ -334,48 +215,32 @@ benchmark comparison. You are speaking aloud, not writing an essay.
 
 | Decision | Chosen | Rationale |
 |----------|--------|-----------|
-| **Source code** | `demo/` in this repo | Single repo. Deployed separately. |
-| **Primary platform** | ElevenLabs Conversational AI + HeyGen | ElevenLabs handles agent + RAG + voice. HeyGen handles avatar. |
-| **Parallel track** | Base44 (Trevor builds manually) | BetaShares demo was built on Base44. Faster path if it works. |
-| **Guaranteed deliverable** | Outcome A (audio-only) by end of Day 1 | Safety net. Ships no matter what. |
-| **Target deliverable** | Outcome B (talking avatar) by end of Day 3 | The "wow factor" demo. Stretch but achievable. |
-| **Frontend** | Static HTML/JS in `demo/` | No framework overhead. |
-| **Hosting** | Vercel | Clean URL. Free tier. |
-| **PDF #5** | Excluded | Different fund. |
+| **Audio format** | PCM 24kHz | LiveAvatar `repeatAudio()` requires PCM. Consistent throughout pipeline. |
+| **Intent classification** | ElevenLabs agent (NLU only) | Agent handles RAG for unknown questions. No local keyword classifier needed for final version. |
+| **Voice output** | All audio through LiveAvatar | Single visual+audio output. No competing browser audio. Voice consistency guaranteed. |
+| **Voice source** | ElevenLabs TTS (custom voice) | Bypass LiveAvatar's built-in TTS. Same voice for pre-generated and runtime. |
+| **Fallback (no avatar)** | Audio-only with cached MP3s | Current working state. Ships if LiveAvatar credits unavailable. |
 
 ---
 
-## Daily Summary
+## Daily Schedule (Remaining)
 
-| Day | Date | Goal | Ship? |
-|-----|------|------|-------|
-| 1 | Tue 25 Mar | Outcome A live (audio-only). ElevenLabs agent accurate. HeyGen avatar created. Base44 assessed. | Outcome A shippable |
-| 2 | Wed 26 Mar | Outcome B integration (ElevenLabs → HeyGen). Avatar speaking in browser. | Outcome B functional or decision to ship A |
-| 3 | Thu 27 Mar | Polish, QA, backup video. Production-ready. | Outcome B polished or Outcome A polished |
-| 4 | Fri 28 Mar | Internal review with Rosie + Gio. Fix feedback. | Final version deployed |
-| 5 | Mon 31 Mar | Buffer for review fixes. | |
+| Day | Date | Focus | Target |
+|-----|------|-------|--------|
+| Today | Tue 25 Mar | Phase A (audio pipeline) | PCM files generated, TTS route built, classifier expanded |
+| Wed | Wed 26 Mar | Phase B (avatar integration) | LiveAvatar SDK wired, avatar speaking pre-generated answers |
+| Thu | Thu 27 Mar | Phase B continued + Phase C | Runtime TTS wired, testing, backup video |
+| Fri | Fri 28 Mar | Phase C (review) | Internal review with Rosie + Gio, fix feedback |
+| Mon | Mon 31 Mar | Buffer + Phase D | Fix review issues, voice clone if audio available |
 
 ---
 
-## Reference Links
+## Reference
 
-- [BetaShares demo (quality bar)](https://betashares.agenticscale.ai/) — built on Base44
-- [Base44 platform](https://base44.com/) — no-code AI app builder (Track C)
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — system design, process flows, component structure
+- [INFRASTRUCTURE.md](../INFRASTRUCTURE.md) — external services, accounts, deployment
 - [OC Mid-Cap Fund page](https://www.ocfunds.com.au/mid-cap-fund)
-- [OC Funds Investment Team (Robert Frost)](https://www.ocfunds.com.au/investment-team)
+- [OC Funds Investment Team](https://www.ocfunds.com.au/investment-team)
 - [ElevenLabs Conversational AI](https://elevenlabs.io/conversational-ai)
-- [ElevenLabs docs](https://elevenlabs.io/docs)
-- [HeyGen Interactive Avatar](https://docs.heygen.com/docs/interactive-avatar)
-- [HeyGen API docs](https://docs.heygen.com/reference)
-
-## Source PDFs (Knowledge Base)
-
-| # | Description | Include? |
-|---|-------------|----------|
-| 1 | [OC Mid-Cap Fund — main page](https://www.ocfunds.com.au/mid-cap-fund) | Yes — primary |
-| 2 | [Latest Fund Report (PDF)](https://53c897c7-871d-4f9d-9e90-e9f932223643.filesusr.com/ugd/01bd19_f9fc80a9c1654b91992bf48455c25d2a.pdf) | Yes — primary |
-| 3 | [Fund document (PDF)](https://0cad8d21-755e-4cdf-99b0-0239b5c718dd.filesusr.com/ugd/01bd19_80d3587044c04174b3a30d36f256b024.pdf) | Yes |
-| 4 | [Fund document (PDF)](https://fd6f9eba-65e5-4bbe-9393-f177bfb63817.filesusr.com/ugd/01bd19_1c3d0fa3bef1427a91c011c5c5eda9bc.pdf) | Yes |
-| 5 | [HSBC Global Infrastructure Equity Fund](https://www.copiapartners.com.au/hsbc-global-infrastructure-equity-fund) | **No — different fund** |
-| 6 | [Fund document (PDF)](https://a8f0a524-aaf4-4339-bc22-9119eeaaf093.filesusr.com/ugd/01bd19_ec42d3d9ce4b484e8a6b5978e1ba2c03.pdf) | Yes |
-| + | [Investment team page (Robert Frost bio)](https://www.ocfunds.com.au/investment-team) | Yes |
+- [LiveAvatar docs](https://docs.liveavatar.com)
+- [LiveAvatar ElevenLabs Agent Plugin](https://docs.liveavatar.com/docs/elevenlabs-agent-plugin)

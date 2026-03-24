@@ -15,13 +15,6 @@ import { useBreadcrumbContext } from "@/components/breadcrumb-context";
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
-  roster: "Roster",
-  escalations: "Escalations",
-  analytics: "Analytics",
-  chat: "Chat",
-  visits: "Visits",
-  employees: "Employees",
-  clients: "Clients",
   settings: "Settings",
 };
 

@@ -2,13 +2,9 @@ import { sql, eq } from "drizzle-orm";
 import { testDb } from "./setup";
 import {
   users,
-  projects,
-  chatConversations,
-  chatMessages,
   userStatusHistory,
   userDevices,
   userSessions,
-  meetings,
 } from "@/src/db/schema";
 
 const TEST_PREFIX = "test_";
@@ -41,29 +37,7 @@ export async function createTestUser(overrides: {
 }
 
 /**
- * Create a test project for a given user.
- */
-export async function createTestProject(userId: string, overrides: {
-  name?: string;
-  description?: string;
-  status?: string;
-} = {}) {
-  const [project] = await testDb
-    .insert(projects)
-    .values({
-      userId,
-      name: overrides.name || "Test Project",
-      description: overrides.description || null,
-      status: overrides.status || "active",
-    })
-    .returning();
-
-  return project;
-}
-
-/**
  * Set tenant context for RLS within a transaction.
- * Uses the current variable name (app.current_tenant_id).
  */
 export async function withTestTenantContext<T>(
   userId: string,
@@ -90,16 +64,10 @@ export async function cleanupTestData() {
   if (testUsers.length === 0) return;
 
   for (const u of testUsers) {
-    // Delete in FK-dependency order (deepest children first)
-    await testDb.delete(chatMessages).where(eq(chatMessages.userId, u.id));
-    await testDb.delete(chatConversations).where(eq(chatConversations.userId, u.id));
-    await testDb.delete(meetings).where(eq(meetings.userId, u.id));
     await testDb.delete(userSessions).where(eq(userSessions.userId, u.id));
     await testDb.delete(userDevices).where(eq(userDevices.userId, u.id));
     await testDb.delete(userStatusHistory).where(eq(userStatusHistory.userId, u.id));
-    await testDb.delete(projects).where(eq(projects.userId, u.id));
   }
 
-  // Finally delete test users
   await testDb.delete(users).where(sql`${users.email} LIKE 'test_%'`);
 }

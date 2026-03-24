@@ -33,7 +33,7 @@ export async function getServerUserFromRequest(
   if (authHeader?.startsWith("Bearer ")) {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
       { global: { headers: { Authorization: authHeader } } }
     );
     const { data: { user }, error } = await supabase.auth.getUser();

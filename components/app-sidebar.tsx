@@ -3,17 +3,7 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import {
-  LayoutDashboard,
-  CalendarClock,
-  Users,
-  UserRound,
-  Settings,
-  ListTodo,
-  AlertTriangle,
-  BarChart3,
-  MessageSquare,
-} from "lucide-react";
+import { LayoutDashboard, Settings } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -30,13 +20,6 @@ import { ThemeToggle } from "./theme-toggle";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Roster", url: "/roster", icon: ListTodo },
-  { title: "Escalations", url: "/escalations", icon: AlertTriangle },
-  { title: "Analytics", url: "/analytics", icon: BarChart3 },
-  { title: "Chat", url: "/chat", icon: MessageSquare },
-  { title: "Visits", url: "/visits", icon: CalendarClock },
-  { title: "Employees", url: "/employees", icon: Users },
-  { title: "Clients", url: "/clients", icon: UserRound },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
@@ -48,9 +31,9 @@ export function AppSidebar() {
       <SidebarHeader className="p-4">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-            D
+            C
           </div>
-          <span className="font-semibold text-lg">DappaAi</span>
+          <span className="font-semibold text-lg">Copia</span>
         </Link>
       </SidebarHeader>
 

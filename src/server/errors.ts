@@ -48,7 +48,7 @@ export class ValidationError extends AppError {
 }
 
 export class ExternalServiceError extends AppError {
-  constructor(message: string, public readonly service: string = "alayacare") {
+  constructor(message: string, public readonly service: string = "external") {
     super(message, "EXTERNAL_SERVICE_ERROR", 502);
     this.name = "ExternalServiceError";
   }
@@ -92,11 +92,6 @@ export function handleAppError(err: unknown, traceId?: string): Response {
       },
       { status: 400 }
     );
-  }
-
-  // AlayaCare API errors → 502 ExternalServiceError
-  if (err instanceof Error && err.message.startsWith("AlayaCare API error")) {
-    return handleAppError(new ExternalServiceError(err.message), traceId);
   }
 
   logger.error(

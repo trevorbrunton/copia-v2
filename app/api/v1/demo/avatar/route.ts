@@ -1,73 +1,68 @@
-import {
-  closeAvatarSession,
-  createAvatarSession,
-  sendAvatarText,
-} from "@/src/demo/heygen-client";
-import { handleAppError, ValidationError } from "@/src/server/errors";
+import { handleAppError } from "@/src/server/errors";
+import { ExternalServiceError } from "@/src/server/errors";
 import { logger } from "@/src/lib/logger";
 
-const MAX_TEXT_LENGTH = 5000;
+const AVATAR_ID = process.env.NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID ?? "";
 
 /**
  * POST /api/v1/demo/avatar
  *
- * Manages HeyGen streaming avatar sessions.
+ * Creates a LiveAvatar LITE session and returns the session token.
+ * The API key is kept server-side; only the session token is exposed to the client.
  * Intentionally unauthenticated — this powers the public investor demo page.
- *
- * Body: { action: "create" | "speak" | "close"; avatarId?: string; sessionId?: string; text?: string }
  */
-export async function POST(req: Request) {
+export async function POST() {
   const traceId = crypto.randomUUID();
   try {
-    const body = await req.json();
-    const { action } = body;
-
-    if (!action || typeof action !== "string") {
-      throw new ValidationError("action is required");
+    const apiKey = process.env.LIVEAVATAR_API_KEY;
+    if (!apiKey) {
+      throw new ExternalServiceError(
+        "LIVEAVATAR_API_KEY is not configured",
+        "liveavatar"
+      );
     }
 
-    switch (action) {
-      case "create": {
-        if (!body.avatarId || typeof body.avatarId !== "string") {
-          throw new ValidationError("avatarId is required for create");
-        }
-        logger.info({ traceId }, "demo:avatar create");
-        const session = await createAvatarSession(body.avatarId);
-        return Response.json(session);
-      }
-
-      case "speak": {
-        if (!body.sessionId || typeof body.sessionId !== "string") {
-          throw new ValidationError("sessionId is required for speak");
-        }
-        const text = typeof body.text === "string" ? body.text.trim() : "";
-        if (!text) {
-          throw new ValidationError("text is required for speak");
-        }
-        if (text.length > MAX_TEXT_LENGTH) {
-          throw new ValidationError(
-            `text exceeds maximum length of ${MAX_TEXT_LENGTH} characters`
-          );
-        }
-        logger.info({ traceId, sessionId: body.sessionId }, "demo:avatar speak");
-        await sendAvatarText(body.sessionId, text);
-        return Response.json({ ok: true });
-      }
-
-      case "close": {
-        if (!body.sessionId || typeof body.sessionId !== "string") {
-          throw new ValidationError("sessionId is required for close");
-        }
-        logger.info({ traceId, sessionId: body.sessionId }, "demo:avatar close");
-        await closeAvatarSession(body.sessionId);
-        return Response.json({ ok: true });
-      }
-
-      default:
-        throw new ValidationError(
-          `Unknown action: ${action}. Expected create, speak, or close.`
-        );
+    if (!AVATAR_ID) {
+      throw new ExternalServiceError(
+        "NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID is not configured",
+        "liveavatar"
+      );
     }
+
+    logger.info({ traceId }, "demo:avatar session request");
+
+    const res = await fetch("https://api.liveavatar.com/v1/sessions/token", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: "LITE",
+        avatar_id: AVATAR_ID,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new ExternalServiceError(
+        `LiveAvatar API error: ${res.status} ${body?.message ?? res.statusText}`,
+        "liveavatar"
+      );
+    }
+
+    const body = await res.json();
+    const sessionToken = body.data?.session_token;
+
+    if (!sessionToken) {
+      throw new ExternalServiceError(
+        "LiveAvatar returned no session token",
+        "liveavatar"
+      );
+    }
+
+    return Response.json({ sessionToken });
   } catch (err) {
     return handleAppError(err, traceId);
   }

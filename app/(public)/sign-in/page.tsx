@@ -33,8 +33,8 @@ function SignInForm() {
   const { signIn } = useAuth();
   const [error, setError] = useState("");
 
-  const rawRedirect = searchParams.get("redirect") || "/dashboard";
-  const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/dashboard";
+  const rawRedirect = searchParams.get("redirect") || "/demo";
+  const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/demo";
 
   const form = useForm<SignInInput>({
     resolver: zodResolver(signInSchema),

@@ -45,7 +45,7 @@ export default function SignUpPage() {
       if (result.needsVerification) {
         setEmailSent(data.email);
       } else {
-        router.push("/dashboard");
+        router.push("/demo");
       }
     } catch (err) {
       setError(getAuthErrorMessage(err, "signUp"));

@@ -10,21 +10,5 @@ export const PERSONA = {
   fundName: "OC Mid-Cap Fund",
 } as const;
 
-export const VOICEFLOW_CONFIG = {
-  baseUrl: "https://general-runtime.voiceflow.com",
-  versionAlias: "production",
-} as const;
-
-export const ELEVENLABS_CONFIG = {
-  baseUrl: "https://api.elevenlabs.io/v1",
-  modelId: "eleven_multilingual_v2",
-  outputFormat: "mp3_44100_128",
-} as const;
-
-export const HEYGEN_CONFIG = {
-  baseUrl: "https://api.heygen.com/v1",
-  quality: "medium",
-} as const;
-
 export const FALLBACK_MESSAGE =
   "That's a great question — I'd suggest speaking directly with our investor relations team for more detail on that.";

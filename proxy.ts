@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Routes accessible without authentication
 const PUBLIC_ROUTES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify", "/demo"];
-// Auth pages that redirect to /dashboard if user is already logged in
+// Auth pages that redirect to /demo if user is already logged in
 const AUTH_PAGES = ["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
 
 export default async function middleware(request: NextRequest) {
@@ -38,7 +38,7 @@ export default async function middleware(request: NextRequest) {
 
   if (user && isAuthPage) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/demo";
     return NextResponse.redirect(url);
   }
 

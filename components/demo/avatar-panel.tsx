@@ -1,6 +1,6 @@
 "use client";
 
-import { User } from "lucide-react";
+import { Volume2 } from "lucide-react";
 import type { DemoStatus } from "@/src/demo/types";
 import { PERSONA } from "@/src/demo/config";
 
@@ -20,13 +20,24 @@ interface AvatarPanelProps {
 export function AvatarPanel({ status }: AvatarPanelProps) {
   return (
     <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
-      {/* Placeholder — replaced with HeyGen stream when connected */}
-      <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[var(--oc-navy)] border-2 border-white/20">
-        <User className="h-12 w-12 text-white/60" />
+      <div className="flex flex-col items-center justify-center">
+        <div className="relative flex h-32 w-32 items-center justify-center rounded-full bg-[var(--oc-navy)] border-2 border-white/20 overflow-hidden">
+          <span className="text-4xl font-bold text-white/30">RF</span>
+          {status === "speaking" && (
+            <div className="absolute inset-0 rounded-full border-2 border-white/40 animate-ping" />
+          )}
+        </div>
+        <p className="mt-4 text-white font-medium">{PERSONA.name}</p>
+        <p className="text-white/60 text-sm">{PERSONA.title}</p>
+        {status === "speaking" && (
+          <div className="mt-2 flex items-center gap-1.5 text-white/50 text-xs">
+            <Volume2 className="h-3.5 w-3.5" />
+            <span>Speaking…</span>
+          </div>
+        )}
       </div>
-      <p className="mt-4 text-white font-medium">{PERSONA.name}</p>
-      <p className="text-white/60 text-sm">{PERSONA.title}</p>
 
+      {/* Status indicator */}
       <div className="absolute bottom-4 left-4 flex items-center gap-2">
         <span
           className={`h-2.5 w-2.5 rounded-full ${

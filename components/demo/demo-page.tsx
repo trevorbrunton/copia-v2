@@ -6,9 +6,12 @@ import { AvatarPanel } from "./avatar-panel";
 import { ChatPanel } from "./chat-panel";
 import { ChatInput } from "./chat-input";
 import { ErrorBanner } from "./error-banner";
+import { Button } from "@/components/ui/button";
+import { Mic } from "lucide-react";
 
 export function DemoPage() {
-  const { status, messages, error, sendMessage } = useDemo();
+  const { status, messages, error, sendMessage, connect, isConnected } =
+    useDemo();
 
   return (
     <div className="flex min-h-svh flex-col bg-[var(--oc-dark)]">
@@ -36,11 +39,37 @@ export function DemoPage() {
             <h2 className="text-sm font-medium text-white">
               Ask {PERSONA.name}
             </h2>
+            {isConnected && (
+              <span className="ml-auto flex items-center gap-1.5 text-xs text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                Connected
+              </span>
+            )}
           </div>
 
           <ErrorBanner message={error} />
-          <ChatPanel messages={messages} status={status} />
-          <ChatInput onSend={sendMessage} status={status} />
+
+          {!isConnected ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+              <p className="text-sm text-white/50 text-center">
+                Click below to start a voice conversation with {PERSONA.name}.
+                <br />
+                You&apos;ll need to allow microphone access.
+              </p>
+              <Button
+                onClick={connect}
+                className="bg-white text-[var(--oc-navy)] hover:bg-white/90 gap-2"
+              >
+                <Mic className="h-4 w-4" />
+                Start Conversation
+              </Button>
+            </div>
+          ) : (
+            <>
+              <ChatPanel messages={messages} status={status} />
+              <ChatInput onSend={sendMessage} status={status} />
+            </>
+          )}
         </div>
       </main>
     </div>

@@ -33,24 +33,26 @@ function createMessage(
 
 /**
  * Fetch a PCM file and return as base64 string (for LiveAvatar mode).
+ * Uses chunked conversion to avoid O(n²) string concatenation.
  */
 async function fetchPcmAsBase64(pcmUrl: string): Promise<string> {
   const res = await fetch(pcmUrl);
   if (!res.ok) throw new Error(`Failed to fetch PCM: ${res.status}`);
   const buffer = await res.arrayBuffer();
   const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const CHUNK_SIZE = 8192;
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    chunks.push(String.fromCharCode(...chunk));
   }
-  return btoa(binary);
+  return btoa(chunks.join(""));
 }
 
 export function useDemo() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   const [isPlayingCached, setIsPlayingCached] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [currentVideoSrc, setCurrentVideoSrc] = useState<string | null>(null);
@@ -59,12 +61,18 @@ export function useDemo() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pcmCacheRef = useRef<Record<string, string>>({});
 
+  // Epoch counter — incremented each time busy mode starts.
+  // Messages are only accepted if their epoch matches the current one,
+  // which prevents stale/queued agent messages from leaking through.
+  const epochRef = useRef(0);
+  const messageEpochRef = useRef(0);
+
   // When true, the system is playing a response — ignore all agent messages.
   const busyRef = useRef(false);
-  // Timestamp when busy ended — messages are dropped for a grace period after this.
-  const busyEndedAtRef = useRef(0);
   // Resolves when a video finishes playing (set by playResponse, called by handleVideoEnded).
   const videoEndedResolveRef = useRef<(() => void) | null>(null);
+  // Ref to track connection status — avoids stale closure issues.
+  const isConnectedRef = useRef(false);
 
   // Avatar hook — always called (hook order stability)
   const avatar = useAvatar();
@@ -72,10 +80,10 @@ export function useDemo() {
   const conversation = useConversation({
     micMuted,
     onConnect: () => {
-      setIsConnected(true);
+      isConnectedRef.current = true;
     },
     onDisconnect: () => {
-      setIsConnected(false);
+      isConnectedRef.current = false;
     },
     onError: (err: string | Error) => {
       const msg = typeof err === "string" ? err : err.message;
@@ -83,10 +91,14 @@ export function useDemo() {
       setIsProcessing(false);
     },
     onMessage: (message: { source: string; message: string }) => {
-      // Drop all messages while a response is playing, and for a grace period
-      // after playback ends (to drain any queued agent messages).
+      // Drop all messages while a response is playing.
       if (busyRef.current) return;
-      if (busyEndedAtRef.current > 0 && Date.now() - busyEndedAtRef.current < 3000) return;
+
+      // Drop messages from a previous epoch (queued during playback).
+      if (messageEpochRef.current !== epochRef.current) {
+        messageEpochRef.current = epochRef.current;
+        return;
+      }
 
       if (message.source === "user") {
         // ElevenLabs transcribed the user's speech — show in chat
@@ -103,6 +115,7 @@ export function useDemo() {
           // Agent classified into a known category — use pre-generated response.
           // Mute mic + agent output so it doesn't hear/speak during playback.
           busyRef.current = true;
+          epochRef.current += 1;
           setMicMuted(true);
           conversation.setVolume({ volume: 0 });
           setMessages((prev) => [
@@ -112,14 +125,17 @@ export function useDemo() {
           setIsProcessing(false);
           playResponseRef.current(cached).finally(() => {
             busyRef.current = false;
-            busyEndedAtRef.current = Date.now();
+            messageEpochRef.current = epochRef.current;
             setMicMuted(false);
             conversation.setVolume({ volume: 1 });
-            // Tell the agent we just finished speaking — resets its idle timer
-            // so it doesn't immediately prompt "are you still there?"
-            conversation.sendContextualUpdate(
-              "You just finished answering. Wait silently for the user's next question. Do not prompt or ask if they are still there."
-            );
+            // Tell the agent we just finished — resets its idle timer.
+            try {
+              conversation.sendContextualUpdate(
+                "You just finished answering. Wait silently for the user's next question. Do not prompt or ask if they are still there."
+              );
+            } catch {
+              // Connection may have dropped during playback — safe to ignore.
+            }
           });
         } else {
           // No category match — show agent's own response text
@@ -133,6 +149,10 @@ export function useDemo() {
     },
   });
 
+  // Keep the ref in sync with SDK connection state.
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -140,11 +160,10 @@ export function useDemo() {
         audioRef.current.pause();
         audioRef.current = null;
       }
-      if (conversation.status === "connected") {
-        conversation.endSession().catch(() => {});
+      if (isConnectedRef.current) {
+        conversationRef.current.endSession().catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Play a pre-generated MP3 audio file (audio-only fallback)
@@ -228,20 +247,21 @@ export function useDemo() {
         }
       } else {
         // Audio-only mode — mute agent TTS, play our MP3
-        if (conversation.status === "connected") {
-          conversation.setVolume({ volume: 0 });
+        const conv = conversationRef.current;
+        if (isConnectedRef.current) {
+          conv.setVolume({ volume: 0 });
         }
         try {
           await playCachedAudio(cached.audioUrl);
         } catch {
           // Text already shown
         }
-        if (conversation.status === "connected") {
-          conversation.setVolume({ volume: 1 });
+        if (isConnectedRef.current) {
+          conv.setVolume({ volume: 1 });
         }
       }
     },
-    [avatar, conversation, playCachedAudio, playPcmOnAvatar]
+    [avatar, playCachedAudio, playPcmOnAvatar]
   );
 
   // Stable ref for playResponse so onMessage callback can access latest version
@@ -267,6 +287,7 @@ export function useDemo() {
     setError(null);
     setHasStarted(true);
     busyRef.current = true;
+    epochRef.current += 1;
     setMicMuted(true);
 
     try {
@@ -278,7 +299,6 @@ export function useDemo() {
       }
 
       // Start greeting and agent connection in parallel.
-      // Greeting plays immediately; agent connects in background.
       const greeting = PREGENERATED.greeting;
       setMessages((prev) => [
         ...prev,
@@ -304,16 +324,17 @@ export function useDemo() {
 
       // Greeting done, agent connected — unmute and start listening.
       busyRef.current = false;
-      busyEndedAtRef.current = Date.now();
+      messageEpochRef.current = epochRef.current;
       setMicMuted(false);
-      if (conversation.status === "connected") {
+      if (isConnectedRef.current) {
         conversation.setVolume({ volume: 1 });
-        conversation.sendContextualUpdate(
-          "You just greeted the user. Wait silently for their first question. Do not prompt or ask if they are still there."
-        );
-      }
-      if (conversation.status === "connected") {
-        conversation.setVolume({ volume: 1 });
+        try {
+          conversation.sendContextualUpdate(
+            "You just greeted the user. Wait silently for their first question. Do not prompt or ask if they are still there."
+          );
+        } catch {
+          // Safe to ignore
+        }
       }
     } catch (err) {
       busyRef.current = false;

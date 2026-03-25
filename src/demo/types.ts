@@ -1,7 +1,7 @@
 /**
  * Types for the OC Mid-Cap Fund investor demo.
  *
- * Architecture: User question → ElevenLabs Conversational AI (RAG + TTS) → HeyGen (avatar)
+ * Architecture: User question → ElevenLabs Conversational AI (RAG + TTS) → Avatar (HeyGen or Tavus CVI)
  */
 
 export interface ChatMessage {

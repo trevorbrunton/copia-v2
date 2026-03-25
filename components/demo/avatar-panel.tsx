@@ -27,10 +27,12 @@ export function AvatarPanel({
   const pendingVideoRef = useRef<string | null>(null);
   const isPlayingResponseRef = useRef(false);
 
-  // Handle LiveAvatar media stream
+  // Handle live media stream (HeyGen LiveAvatar or Tavus CVI via Daily.co)
   useEffect(() => {
     if (videoRef.current && mediaStream) {
       videoRef.current.srcObject = mediaStream;
+      // Unmute so the avatar's audio plays through
+      videoRef.current.muted = false;
     }
   }, [mediaStream]);
 

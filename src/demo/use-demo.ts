@@ -5,9 +5,11 @@ import { useConversation } from "@11labs/react";
 import {
   USE_VIDEO_AVATAR,
   USE_LIVE_AVATAR,
+  USE_TAVUS_AVATAR,
 } from "./config";
 import { PREGENERATED } from "./classifier";
 import { useAvatar } from "./use-avatar";
+import { useTavusAvatar } from "./use-tavus-avatar";
 import type { ChatMessage, DemoStatus } from "./types";
 
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
@@ -74,8 +76,9 @@ export function useDemo() {
   // Ref to track connection status — avoids stale closure issues.
   const isConnectedRef = useRef(false);
 
-  // Avatar hook — always called (hook order stability)
+  // Avatar hooks — always called for hook order stability
   const avatar = useAvatar();
+  const tavusAvatar = useTavusAvatar();
 
   const conversation = useConversation({
     micMuted,
@@ -206,6 +209,19 @@ export function useDemo() {
     [avatar]
   );
 
+  // Send text to Tavus avatar for lip-synced speech (echo mode)
+  const playTextOnTavus = useCallback(
+    (text: string): Promise<void> => {
+      return new Promise((resolve) => {
+        tavusAvatar.echo(text);
+        // Estimate duration from text length (~60ms per character)
+        const estimatedDuration = Math.max(3000, text.length * 60);
+        setTimeout(resolve, estimatedDuration);
+      });
+    },
+    [tavusAvatar]
+  );
+
   /**
    * Play a response — dispatches to the correct mode.
    *
@@ -217,7 +233,7 @@ export function useDemo() {
    * Returns a promise that resolves when playback is complete.
    */
   const playResponse = useCallback(
-    async (cached: { audioUrl: string; pcmUrl: string; videoUrl: string }) => {
+    async (cached: { audioUrl: string; pcmUrl: string; videoUrl: string; text: string }) => {
       if (USE_VIDEO_AVATAR) {
         // Check if a pre-generated video exists for this response
         let hasVideo = false;
@@ -237,6 +253,13 @@ export function useDemo() {
           });
         } else {
           // No video — play MP3 audio while idle video keeps looping
+          await playCachedAudio(cached.audioUrl).catch(() => {});
+        }
+      } else if (USE_TAVUS_AVATAR && tavusAvatar.status === "ready") {
+        // Tavus CVI — send text via echo mode for lip-synced speech
+        try {
+          await playTextOnTavus(cached.text);
+        } catch {
           await playCachedAudio(cached.audioUrl).catch(() => {});
         }
       } else if (USE_LIVE_AVATAR && avatar.status === "ready") {
@@ -261,7 +284,7 @@ export function useDemo() {
         }
       }
     },
-    [avatar, playCachedAudio, playPcmOnAvatar]
+    [avatar, tavusAvatar, playCachedAudio, playPcmOnAvatar, playTextOnTavus]
   );
 
   // Stable ref for playResponse so onMessage callback can access latest version
@@ -291,7 +314,12 @@ export function useDemo() {
     setMicMuted(true);
 
     try {
-      if (USE_LIVE_AVATAR) {
+      if (USE_TAVUS_AVATAR) {
+        const avatarReady = await tavusAvatar.initAvatar();
+        if (!avatarReady) {
+          console.warn("Tavus avatar failed to connect — running in audio-only mode");
+        }
+      } else if (USE_LIVE_AVATAR) {
         const avatarReady = await avatar.initAvatar();
         if (!avatarReady) {
           console.warn("Avatar failed to connect — running in audio-only mode");
@@ -343,23 +371,26 @@ export function useDemo() {
     } finally {
       isConnectingRef.current = false;
     }
-  }, [conversation, playResponse, avatar]);
+  }, [conversation, playResponse, avatar, tavusAvatar]);
 
   const demoStatus: DemoStatus = isProcessing
     ? "processing"
     : isPlayingCached ||
         currentVideoSrc !== null ||
-        avatar.status === "speaking"
+        avatar.status === "speaking" ||
+        tavusAvatar.status === "speaking"
       ? "speaking"
       : "ready";
 
   return {
     status: demoStatus,
     messages,
-    error: error || avatar.error,
+    error: error || avatar.error || tavusAvatar.error,
     connect,
     isConnected: hasStarted,
-    avatarStream: avatar.mediaStream,
+    avatarStream: USE_TAVUS_AVATAR
+      ? tavusAvatar.mediaStream
+      : avatar.mediaStream,
     currentVideoSrc,
     handleVideoEnded,
   };

@@ -67,10 +67,7 @@ const qaPairSchema = z.object({
   label: z.string().min(1, "Label is required").max(200),
   answerText: z.string().min(1, "Answer text is required"),
   audioUrl: z.string().url("Must be a valid URL").or(z.literal("")).optional(),
-  sortOrder: z.preprocess(
-    (val) => (val === "" || val === undefined ? undefined : Number(val)),
-    z.number().int().min(0).optional(),
-  ),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
 type QaPairFormValues = z.infer<typeof qaPairSchema>;
@@ -304,7 +301,18 @@ function QaPairDialog({
                   <FormItem>
                     <FormLabel>Sort Order</FormLabel>
                     <FormControl>
-                      <Input type="number" min={0} {...field} />
+                      <Input
+                        type="number"
+                        min={0}
+                        {...field}
+                        onChange={(e) =>
+                          field.onChange(
+                            e.target.value === ""
+                              ? undefined
+                              : Number(e.target.value),
+                          )
+                        }
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

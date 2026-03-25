@@ -57,7 +57,8 @@ app/
 │       └── demo/              # Investor demo API (unauthenticated)
 │           ├── chat/          # POST — Voiceflow RAG agent
 │           ├── tts/           # POST — ElevenLabs text-to-speech (streaming)
-│           └── avatar/        # POST — HeyGen streaming avatar (create/speak/close)
+│           ├── avatar/        # POST — HeyGen streaming avatar (create/speak/close)
+│           └── tavus/         # POST — Tavus CVI conversation (create)
 ├── demo/               # Public investor demo page (no auth)
 ├── layout.tsx          # Root layout with providers
 └── globals.css
@@ -105,13 +106,15 @@ src/
 │   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory
 │   └── migrations/     # SQL migrations
 ├── demo/               # Investor demo module (OC Mid-Cap Fund)
-│   ├── config.ts       # Persona, vendor API configs (Voiceflow, ElevenLabs, HeyGen)
+│   ├── config.ts       # Persona, vendor API configs (Voiceflow, ElevenLabs, HeyGen, Tavus)
 │   ├── types.ts        # ChatMessage, DemoStatus, AvatarSession, VoiceflowMessage
 │   ├── fetch-external.ts # Shared fetch helper for vendor APIs (timeout + error handling)
 │   ├── voiceflow-client.ts # Voiceflow General Runtime interaction
 │   ├── elevenlabs-client.ts # ElevenLabs TTS (streaming response)
 │   ├── heygen-client.ts # HeyGen streaming avatar session management
-│   ├── use-demo.ts     # useDemo hook (chat state machine + Voiceflow integration)
+│   ├── use-avatar.ts   # useAvatar hook (HeyGen LiveAvatar SDK)
+│   ├── use-tavus-avatar.ts # useTavusAvatar hook (Tavus CVI via Daily.co WebRTC)
+│   ├── use-demo.ts     # useDemo hook (chat state machine + avatar orchestration)
 │   └── index.ts        # Public API exports
 ├── hooks/
 │   ├── use-user.ts     # User profile + delete account (with cache invalidation)
@@ -219,13 +222,16 @@ Use `@/*` to import from the project root.
 
 ### Investor Demo (OC Mid-Cap Fund)
 - Public page at `/demo` — no auth required (added to `PUBLIC_ROUTES` in `proxy.ts`)
-- Architecture: User question → Voiceflow (RAG) → ElevenLabs (TTS) → HeyGen (avatar)
-- Three unauthenticated API routes under `/api/v1/demo/` (chat, tts, avatar)
+- Architecture: User question → ElevenLabs Conversational AI (RAG + TTS) → Avatar (HeyGen or Tavus CVI)
+- Unauthenticated API routes under `/api/v1/demo/` (chat, tts, avatar, tavus)
 - Server-side vendor clients in `src/demo/` share `fetchExternal()` for timeout + error handling
 - Client-side `useDemo()` hook manages chat state via `useReducer`
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
 - Web Speech API for voice input (Chrome/Edge); graceful degradation to text-only
+- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"video"` | `"live"` | `"tavus"` | `"audio"`
+- Tavus CVI uses Daily.co WebRTC for streaming; echo mode sends text for lip-synced speech
 - Env vars: `VOICEFLOW_API_KEY`, `HEYGEN_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
+- Tavus env vars: `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
 
 ## Environment Variables
 

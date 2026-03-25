@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Mic } from "lucide-react";
 
 export function DemoPage() {
-  const { status, messages, error, sendMessage, connect, isConnected } =
+  const { status, messages, error, sendMessage, connect, isConnected, avatarStream } =
     useDemo();
 
   return (
@@ -31,7 +31,7 @@ export function DemoPage() {
 
       <main className="flex flex-1 flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6 overflow-hidden">
         <div className="w-full lg:w-1/2 xl:w-3/5 shrink-0">
-          <AvatarPanel status={status} />
+          <AvatarPanel status={status} mediaStream={avatarStream} />
         </div>
 
         <div className="flex flex-1 flex-col mt-4 lg:mt-0 rounded-2xl border border-white/10 bg-[var(--oc-navy)] overflow-hidden min-h-0">

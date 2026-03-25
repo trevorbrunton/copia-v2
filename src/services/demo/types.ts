@@ -2,11 +2,35 @@ import { z } from "zod";
 
 // ─── Response categories ────────────────────────────────────
 export const responseCategories = [
+  "greeting",
   "fund_manager",
   "investment_strategy",
   "since_inception_return",
   "recent_performance",
   "benchmark_comparison",
+  "fund_overview",
+  "fund_details",
+  "fees",
+  "minimum_investment",
+  "how_to_invest",
+  "distributions",
+  "investment_universe",
+  "portfolio_holdings",
+  "why_mid_caps",
+  "risk_management",
+  "about_oc",
+  "team_overview",
+  "nga_lucas",
+  "ratings",
+  "esg",
+  "other_funds",
+  "copia",
+  "mlc_mandate",
+  "withdrawal",
+  "cooling_off",
+  "tax",
+  "contact",
+  "active_vs_passive",
   "fallback",
 ] as const;
 
@@ -46,7 +70,6 @@ export const demoResponseWithPatternsSchema = demoResponseSchema.extend({
 export type DemoResponseWithPatterns = z.infer<typeof demoResponseWithPatternsSchema>;
 
 // ─── Classification result ──────────────────────────────────
-// Returned by the voice agent when it classifies a question
 
 export const classificationResultSchema = z.object({
   category: z.enum(responseCategories),

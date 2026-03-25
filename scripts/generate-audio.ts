@@ -1,11 +1,14 @@
 /**
  * Generate pre-recorded audio files for demo responses using ElevenLabs TTS.
- * Outputs MP3 files to public/audio/<category>.mp3
  *
- * Usage: bun scripts/generate-audio.ts
+ * Outputs BOTH formats:
+ *   - PCM 24kHz (for LiveAvatar repeatAudio): public/audio/<category>.pcm
+ *   - MP3 (for browser Audio fallback):       public/audio/<category>.mp3
+ *
+ * Usage: bun scripts/generate-audio.ts [--pcm-only] [--mp3-only]
  */
 
-const VOICE_ID = "ixN1ejtr8VuHmrwZTAgr";
+const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "ixN1ejtr8VuHmrwZTAgr";
 const MODEL_ID = "eleven_flash_v2";
 const API_KEY = process.env.ELEVENLABS_API_KEY;
 
@@ -14,7 +17,14 @@ if (!API_KEY) {
   process.exit(1);
 }
 
+const pcmOnly = process.argv.includes("--pcm-only");
+const mp3Only = process.argv.includes("--mp3-only");
+const formats = pcmOnly ? ["pcm"] : mp3Only ? ["mp3"] : ["pcm", "mp3"];
+
 const responses: Record<string, string> = {
+  greeting:
+    "Hello, I'm Robert Frost, Head of Investments at OC Funds Management. Welcome — I'm happy to answer any questions you have about the OC Mid-Cap Fund or our investment approach.",
+
   fund_manager:
     "The OC Mid-Cap Fund is managed by myself, Robert Frost, as Head of Investments at OC Funds Management, alongside Nga Lucas who serves as Portfolio Manager for the Mid-Cap strategy. Between us we oversee the full investment process, from idea generation through to portfolio construction.",
 
@@ -32,9 +42,6 @@ const responses: Record<string, string> = {
 
   fallback:
     "That's a great question. For more detail on that topic, I'd suggest speaking directly with our investor relations team who can provide you with the most current and comprehensive information.",
-
-  greeting:
-    "Hello, I'm Robert Frost, Head of Investments at OC Funds Management. Welcome — I'm happy to answer any questions you have about the OC Mid-Cap Fund or our investment approach.",
 
   fund_overview:
     "The OC Mid-Cap Fund is a long-only, benchmark-unaware Australian equity strategy focused on high-quality, well-managed mid-cap stocks. We invest in twenty-five to fifty companies listed on the ASX, targeting the segment of the market that has produced superior investment returns over the past two decades. The fund launched in December 2024 as a registered managed investment scheme, though the strategy has been managed as a wholesale trust since November 2023.",
@@ -106,8 +113,18 @@ const responses: Record<string, string> = {
     "We believe active management is particularly well suited to the mid-cap and small-cap segments of the market. Research shows that active managers have clear dominance in the Australian small and mid-cap category, supported by their ability to exploit pricing inefficiencies in relatively under-researched segments. The median Australian small-cap active fund has outperformed the index by one point eight percentage points over three years, two point two over five years, and three point three over ten years, after fees. Our benchmark-unaware approach allows us to invest based purely on conviction rather than index weight.",
 };
 
-async function generateAudio(category: string, text: string): Promise<void> {
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`;
+const FORMAT_CONFIG = {
+  pcm: { param: "pcm_24000", ext: "pcm" },
+  mp3: { param: "mp3_44100_128", ext: "mp3" },
+} as const;
+
+async function generateAudio(
+  category: string,
+  text: string,
+  format: "pcm" | "mp3"
+): Promise<void> {
+  const { param, ext } = FORMAT_CONFIG[format];
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=${param}`;
 
   const res = await fetch(url, {
     method: "POST",
@@ -123,20 +140,24 @@ async function generateAudio(category: string, text: string): Promise<void> {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`TTS failed for ${category}: ${res.status} ${body}`);
+    throw new Error(`TTS failed for ${category}.${ext}: ${res.status} ${body}`);
   }
 
   const buffer = await res.arrayBuffer();
-  const path = `public/audio/${category}.mp3`;
+  const path = `public/audio/${category}.${ext}`;
   await Bun.write(path, buffer);
   const sizeKB = Math.round(buffer.byteLength / 1024);
-  console.log(`  ✓ ${category}.mp3 (${sizeKB} KB)`);
+  console.log(`  ✓ ${category}.${ext} (${sizeKB} KB)`);
 }
 
-console.log(`Generating audio with voice ${VOICE_ID}...\n`);
+console.log(`Voice: ${VOICE_ID}`);
+console.log(`Formats: ${formats.join(", ")}`);
+console.log(`Responses: ${Object.keys(responses).length}\n`);
 
 for (const [category, text] of Object.entries(responses)) {
-  await generateAudio(category, text);
+  for (const format of formats) {
+    await generateAudio(category, text, format as "pcm" | "mp3");
+  }
 }
 
 console.log("\n✓ All audio files generated in public/audio/");

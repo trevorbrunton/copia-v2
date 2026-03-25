@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 
+// Log at build time so we can verify env vars in Vercel build logs
+console.log("[build] NEXT_PUBLIC_AVATAR_MODE =", JSON.stringify(process.env.NEXT_PUBLIC_AVATAR_MODE));
+
 const nextConfig: NextConfig = {
   async rewrites() {
     return [

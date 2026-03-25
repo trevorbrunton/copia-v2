@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { DemoStatus } from "@/src/demo/types";
 
 interface AvatarPanelProps {
   status: DemoStatus;
   /** LiveAvatar media stream (live mode) */
   mediaStream?: MediaStream | null;
+  /** True when a live stream is expected (tavus/live modes) — suppresses idle video */
+  expectsStream?: boolean;
   /** Current MP4 video source — null means show idle loop */
   videoSrc?: string | null;
   /** Idle video to loop between responses */
@@ -28,6 +31,7 @@ interface AvatarPanelProps {
 export function AvatarPanel({
   status,
   mediaStream,
+  expectsStream = false,
   videoSrc,
   idleVideoSrc = "/video/idle.mp4",
   onVideoEnded,
@@ -90,10 +94,16 @@ export function AvatarPanel({
     onVideoEnded?.();
   }, [onVideoEnded]);
 
-  // Live stream mode — single video element
-  if (mediaStream) {
+  // Live stream mode (tavus/live) — single video element, loader until stream arrives
+  if (mediaStream || expectsStream) {
     return (
       <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
+        {!mediaStream && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
+            <Loader2 className="h-8 w-8 text-white/40 animate-spin" />
+            <p className="text-sm text-white/40">Connecting avatar...</p>
+          </div>
+        )}
         <video
           ref={streamRef}
           autoPlay

@@ -7,6 +7,7 @@ import {
   USE_LIVE_AVATAR,
   USE_TAVUS_AVATAR,
   USE_HAIKU_MODE,
+  USE_LOCAL_PIPELINE,
 } from "./config";
 import { PREGENERATED } from "./classifier";
 import { useAvatar } from "./use-avatar";
@@ -63,6 +64,8 @@ export function useDemo() {
   const [micMuted, setMicMuted] = useState(true);
   const isConnectingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // PCM base64 cache for LiveAvatar mode. Bounded by the fixed set of
+  // demo_responses categories (~30 entries, ~15MB max). Acceptable for a demo.
   const pcmCacheRef = useRef<Record<string, string>>({});
 
   // Epoch counter — incremented each time busy mode starts.
@@ -70,7 +73,13 @@ export function useDemo() {
   const messageEpochRef = useRef(0);
 
   // When true, the system is playing a response — ignore all input.
+  // busyRef for synchronous checks in callbacks; isBusy for reactive UI (status badge).
   const busyRef = useRef(false);
+  const [isBusy, setIsBusy] = useState(false);
+  const setBusy = useCallback((val: boolean) => {
+    busyRef.current = val;
+    setIsBusy(val);
+  }, []);
   // Resolves when a video finishes playing.
   const videoEndedResolveRef = useRef<(() => void) | null>(null);
   // Ref to track ElevenLabs agent connection status.
@@ -80,7 +89,11 @@ export function useDemo() {
   const avatar = useAvatar();
   const tavusAvatar = useTavusAvatar();
 
-  // ─── Haiku mode: continuous voice listener ────────────────────────
+  // Track avatar readiness via ref — React state may not have flushed
+  // when playResponse runs immediately after initAvatar resolves.
+  const avatarReadyRef = useRef(false);
+
+  // ─── Local pipeline: continuous voice listener (haiku + live) ─────
 
   // Ref for voiceListener controls — avoids stale closure in handleUtterance
   const voiceListenerRef = useRef<{ pause: () => void; resume: () => void }>({
@@ -89,7 +102,7 @@ export function useDemo() {
   });
 
   /**
-   * Called by the voice listener when the user finishes an utterance.
+   * Called by the voice listener when the user finishes an utterance (haiku + live modes).
    * Transcribes via ElevenLabs STT → matches via Bedrock Haiku → plays response.
    */
   const handleUtterance = useCallback(
@@ -97,7 +110,7 @@ export function useDemo() {
       if (busyRef.current) return;
 
       // Pause listener immediately to prevent overlapping utterances
-      busyRef.current = true;
+      setBusy(true);
       voiceListenerRef.current.pause();
       setIsProcessing(true);
 
@@ -125,7 +138,7 @@ export function useDemo() {
         if (!userText) {
           // No speech detected — resume listening
           setIsProcessing(false);
-          busyRef.current = false;
+          setBusy(false);
           voiceListenerRef.current.resume();
           return;
         }
@@ -169,24 +182,24 @@ export function useDemo() {
 
         // Step 3: Play matched video/audio, then resume listening
         await playResponseRef.current(cached);
-        busyRef.current = false;
+        setBusy(false);
         voiceListenerRef.current.resume();
       } catch (err) {
         setIsProcessing(false);
-        busyRef.current = false;
+        setBusy(false);
         voiceListenerRef.current.resume();
         setError(
           err instanceof Error ? err.message : "Failed to process question",
         );
       }
     },
-    [],
+    [setBusy],
   );
 
   const voiceListener = useVoiceListener({ onUtterance: handleUtterance });
   voiceListenerRef.current = voiceListener;
 
-  // ─── ElevenLabs agent (non-haiku modes) ───────────────────────────
+  // ─── ElevenLabs agent (only for modes not using the local pipeline) ──
 
   const conversation = useConversation({
     micMuted,
@@ -197,13 +210,13 @@ export function useDemo() {
       isConnectedRef.current = false;
     },
     onError: (err: string | Error) => {
-      if (USE_HAIKU_MODE) return;
+      if (USE_LOCAL_PIPELINE) return;
       const msg = typeof err === "string" ? err : err.message;
       setError(msg);
       setIsProcessing(false);
     },
     onMessage: (message: { source: string; message: string }) => {
-      if (USE_HAIKU_MODE) return;
+      if (USE_LOCAL_PIPELINE) return;
       if (busyRef.current) return;
 
       if (messageEpochRef.current !== epochRef.current) {
@@ -234,7 +247,7 @@ export function useDemo() {
             busyRef.current = false;
             messageEpochRef.current = epochRef.current;
             setMicMuted(false);
-            conversation.setVolume({ volume: 1 });
+              conversation.setVolume({ volume: 1 });
             try {
               conversation.sendContextualUpdate(
                 "You just finished answering. Wait silently for the user's next question. Do not prompt or ask if they are still there."
@@ -244,6 +257,7 @@ export function useDemo() {
             }
           });
         } else {
+          // No category match — show agent's own response text
           setMessages((prev) => [
             ...prev,
             createMessage("assistant", message.message),
@@ -264,7 +278,7 @@ export function useDemo() {
         audioRef.current.pause();
         audioRef.current = null;
       }
-      if (USE_HAIKU_MODE) {
+      if (USE_LOCAL_PIPELINE) {
         voiceListener.stop();
       } else if (isConnectedRef.current) {
         conversationRef.current.endSession().catch(() => {});
@@ -298,13 +312,18 @@ export function useDemo() {
   }, []);
 
   const playPcmOnAvatar = useCallback(
-    async (pcmUrl: string) => {
+    async (pcmUrl: string): Promise<void> => {
       let base64 = pcmCacheRef.current[pcmUrl];
       if (!base64) {
         base64 = await fetchPcmAsBase64(pcmUrl);
         pcmCacheRef.current[pcmUrl] = base64;
       }
       avatar.speakAudio(base64);
+      // Wait for estimated playback duration before resolving.
+      // PCM files are 24kHz 16-bit mono → 48,000 bytes/sec.
+      const pcmBytes = atob(base64).length;
+      const durationMs = Math.max(3000, (pcmBytes / (24000 * 2)) * 1000);
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
     },
     [avatar]
   );
@@ -322,6 +341,7 @@ export function useDemo() {
 
   const playResponse = useCallback(
     async (cached: { audioUrl: string; pcmUrl: string; videoUrl: string; text: string }) => {
+      // Haiku plays pre-recorded video; live sends PCM to avatar (handled below)
       if (USE_VIDEO_AVATAR || USE_HAIKU_MODE) {
         let hasVideo = false;
         try {
@@ -340,13 +360,13 @@ export function useDemo() {
         } else {
           await playCachedAudio(cached.audioUrl).catch(() => {});
         }
-      } else if (USE_TAVUS_AVATAR && tavusAvatar.status === "ready") {
+      } else if (USE_TAVUS_AVATAR && avatarReadyRef.current) {
         try {
           await playTextOnTavus(cached.text);
         } catch {
           await playCachedAudio(cached.audioUrl).catch(() => {});
         }
-      } else if (USE_LIVE_AVATAR && avatar.status === "ready") {
+      } else if (USE_LIVE_AVATAR && avatarReadyRef.current) {
         try {
           await playPcmOnAvatar(cached.pcmUrl);
         } catch {
@@ -363,11 +383,12 @@ export function useDemo() {
         if (isConnectedRef.current) conv.setVolume({ volume: 1 });
       }
     },
-    [avatar, tavusAvatar, playCachedAudio, playPcmOnAvatar, playTextOnTavus]
+    [playCachedAudio, playPcmOnAvatar, playTextOnTavus]
   );
 
   const playResponseRef = useRef(playResponse);
   playResponseRef.current = playResponse;
+
 
   const handleVideoEnded = useCallback(() => {
     setCurrentVideoSrc(null);
@@ -385,26 +406,27 @@ export function useDemo() {
     isConnectingRef.current = true;
     setError(null);
     setHasStarted(true);
-    busyRef.current = true;
+    setBusy(true);
     epochRef.current += 1;
     setMicMuted(true);
 
     try {
-      if (!USE_HAIKU_MODE) {
-        if (USE_TAVUS_AVATAR) {
-          const avatarReady = await tavusAvatar.initAvatar();
-          if (!avatarReady) {
-            console.warn("Tavus avatar failed to connect — running in audio-only mode");
-          }
-        } else if (USE_LIVE_AVATAR) {
-          const avatarReady = await avatar.initAvatar();
-          if (!avatarReady) {
-            console.warn("Avatar failed to connect — running in audio-only mode");
-          }
+      // Init avatar renderers before greeting so playResponse routes correctly.
+      // Must complete before greeting plays — avatar needs to be "ready" for
+      // playResponse to route to playPcmOnAvatar/playTextOnTavus.
+      if (USE_TAVUS_AVATAR) {
+        avatarReadyRef.current = await tavusAvatar.initAvatar();
+        if (!avatarReadyRef.current) {
+          console.warn("Tavus avatar failed to connect — running in audio-only mode");
+        }
+      } else if (USE_LIVE_AVATAR) {
+        avatarReadyRef.current = await avatar.initAvatar();
+        if (!avatarReadyRef.current) {
+          console.warn("Avatar failed to connect — running in audio-only mode");
         }
       }
 
-      // Play greeting
+      // Play greeting (avatar is ready at this point, so routing is correct)
       const greeting = PREGENERATED.greeting;
       setMessages((prev) => [
         ...prev,
@@ -413,8 +435,8 @@ export function useDemo() {
 
       const greetingPromise = playResponse(greeting);
 
-      // In haiku mode, skip ElevenLabs agent — start voice listener instead
-      const setupPromise = USE_HAIKU_MODE
+      // Local pipeline modes use voice listener; others use ElevenLabs agent
+      const setupPromise = USE_LOCAL_PIPELINE
         ? Promise.resolve()
         : (AGENT_ID
           ? conversation.startSession({
@@ -430,11 +452,11 @@ export function useDemo() {
       await Promise.all([greetingPromise, setupPromise]);
 
       // Greeting done — ready for interaction
-      busyRef.current = false;
+      setBusy(false);
       messageEpochRef.current = epochRef.current;
 
-      if (USE_HAIKU_MODE) {
-        // Start continuous voice listener
+      if (USE_LOCAL_PIPELINE) {
+        // Start continuous voice listener (haiku, live, tavus modes)
         await voiceListener.start();
       } else {
         setMicMuted(false);
@@ -450,13 +472,13 @@ export function useDemo() {
         }
       }
     } catch (err) {
-      busyRef.current = false;
+      setBusy(false);
       const msg = err instanceof Error ? err.message : "Failed to connect";
       setError(msg);
     } finally {
       isConnectingRef.current = false;
     }
-  }, [conversation, playResponse, avatar, tavusAvatar, voiceListener]);
+  }, [conversation, playResponse, avatar, tavusAvatar, voiceListener, setBusy]);
 
   // ─── Status ───────────────────────────────────────────────────────
 
@@ -467,7 +489,7 @@ export function useDemo() {
         avatar.status === "speaking" ||
         tavusAvatar.status === "speaking"
       ? "speaking"
-      : voiceListener.isListening && !busyRef.current
+      : voiceListener.isListening && !isBusy
         ? "listening"
         : "ready";
 
@@ -482,7 +504,7 @@ export function useDemo() {
       : avatar.mediaStream,
     currentVideoSrc,
     handleVideoEnded,
-    // Haiku mode — expose listening/speaking state for UI
+    // Local pipeline (haiku + live) — expose listening/speaking state for UI
     isListening: voiceListener.isListening,
     isSpeaking: voiceListener.isSpeaking,
   };

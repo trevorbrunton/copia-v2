@@ -1,7 +1,7 @@
 "use client";
 
 import { useDemo } from "@/src/demo/use-demo";
-import { PERSONA } from "@/src/demo/config";
+import { PERSONA, USE_TAVUS_AVATAR, USE_LIVE_AVATAR } from "@/src/demo/config";
 import { AvatarPanel } from "./avatar-panel";
 import { ChatPanel } from "./chat-panel";
 import { StatusBadge } from "./status-badge";
@@ -36,6 +36,7 @@ export function DemoPage() {
           <AvatarPanel
             status={status}
             mediaStream={avatarStream}
+            expectsStream={USE_TAVUS_AVATAR || USE_LIVE_AVATAR}
             videoSrc={currentVideoSrc}
             onVideoEnded={handleVideoEnded}
           />

@@ -55,10 +55,12 @@ app/
 │       ├── user/devices/   # GET devices, [id] remove device
 │       ├── user/login-history/ # GET login history
 │       └── demo/              # Investor demo API (unauthenticated)
-│           ├── chat/          # POST — Voiceflow RAG agent
+│           ├── chat/          # POST — Voiceflow RAG agent (legacy)
 │           ├── tts/           # POST — ElevenLabs text-to-speech (streaming)
 │           ├── avatar/        # POST — HeyGen streaming avatar (create/speak/close)
-│           └── tavus/         # POST — Tavus CVI conversation (create)
+│           ├── tavus/         # POST — Tavus CVI conversation (create)
+│           ├── transcribe/    # POST — ElevenLabs STT (PCM→WAV→scribe_v1)
+│           └── match/         # POST — Bedrock Haiku question→category matcher
 ├── demo/               # Public investor demo page (no auth)
 ├── layout.tsx          # Root layout with providers
 └── globals.css
@@ -81,9 +83,10 @@ components/
 ├── ui/                 # shadcn/ui components (incl. badge, breadcrumb)
 ├── demo/               # Investor demo page components
 │   ├── demo-page.tsx   # Main layout (header + avatar + chat)
-│   ├── avatar-panel.tsx # Avatar placeholder with status indicator
+│   ├── avatar-panel.tsx # Dual-layer video (idle loop + response overlay, no flicker)
 │   ├── chat-panel.tsx  # Message list with typing indicator
 │   ├── chat-input.tsx  # Text input + voice input (Web Speech API)
+│   ├── status-badge.tsx # Status indicator (ready/listening/thinking/speaking)
 │   └── error-banner.tsx # Dismissable error display
 └── settings/           # Settings tab components
     ├── profile-tab.tsx
@@ -103,18 +106,17 @@ src/
 │   └── index.ts        # Public API exports
 ├── db/
 │   ├── index.ts        # Drizzle client (postgres-js)
-│   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory
+│   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory, demoResponses, demoQuestionPatterns
 │   └── migrations/     # SQL migrations
 ├── demo/               # Investor demo module (OC Mid-Cap Fund)
-│   ├── config.ts       # Persona, vendor API configs (Voiceflow, ElevenLabs, HeyGen, Tavus)
-│   ├── types.ts        # ChatMessage, DemoStatus, AvatarSession, VoiceflowMessage
-│   ├── fetch-external.ts # Shared fetch helper for vendor APIs (timeout + error handling)
-│   ├── voiceflow-client.ts # Voiceflow General Runtime interaction
-│   ├── elevenlabs-client.ts # ElevenLabs TTS (streaming response)
-│   ├── heygen-client.ts # HeyGen streaming avatar session management
+│   ├── config.ts       # Avatar mode flags, persona, USE_LOCAL_PIPELINE
+│   ├── types.ts        # ChatMessage, DemoStatus, AvatarSession
+│   ├── classifier.ts   # Static PREGENERATED response map (30 categories with media URLs)
+│   ├── bedrock-matcher.ts # Bedrock Haiku question classifier (DB-backed, cached)
+│   ├── use-voice-listener.ts # Continuous VAD + PCM capture (AudioContext)
 │   ├── use-avatar.ts   # useAvatar hook (HeyGen LiveAvatar SDK)
 │   ├── use-tavus-avatar.ts # useTavusAvatar hook (Tavus CVI via Daily.co WebRTC)
-│   ├── use-demo.ts     # useDemo hook (chat state machine + avatar orchestration)
+│   ├── use-demo.ts     # useDemo hook (orchestrates local pipeline + agent modes)
 │   └── index.ts        # Public API exports
 ├── hooks/
 │   ├── use-user.ts     # User profile + delete account (with cache invalidation)
@@ -210,7 +212,7 @@ Use `@/*` to import from the project root.
 - `DrizzleReadOnly` uses `SET TRANSACTION READ ONLY` to prevent accidental writes in queries
 - Drizzle ORM for type-safe queries
 - Use `integer` (not `boolean`) for boolean columns — driver compatibility
-- Tables: `users`, `projects`, `meetings`, `chatConversations`, `chatMessages`, `userStatusHistory`, `userDevices`, `userSessions`
+- Tables: `users`, `projects`, `meetings`, `chatConversations`, `chatMessages`, `userStatusHistory`, `userDevices`, `userSessions`, `demoResponses`, `demoQuestionPatterns`
 
 ### User Lifecycle
 - Status machine: `active` → `suspended`, `suspended` → `active`, `active` → `soft_deleted`
@@ -222,15 +224,19 @@ Use `@/*` to import from the project root.
 
 ### Investor Demo (OC Mid-Cap Fund)
 - Public page at `/demo` — no auth required (added to `PUBLIC_ROUTES` in `proxy.ts`)
-- Architecture: User question → ElevenLabs Conversational AI (RAG + TTS) → Avatar (HeyGen or Tavus CVI)
-- Unauthenticated API routes under `/api/v1/demo/` (chat, tts, avatar, tavus)
-- Server-side vendor clients in `src/demo/` share `fetchExternal()` for timeout + error handling
-- Client-side `useDemo()` hook manages chat state via `useReducer`
+- Two processing pipelines controlled by `USE_LOCAL_PIPELINE` flag in `src/demo/config.ts`:
+  - **Local pipeline** (haiku + live modes): VAD → ElevenLabs STT (`scribe_v1`) → Bedrock Haiku classifier → DB responses → play video/audio or LiveAvatar
+  - **Agent pipeline** (video, tavus, audio modes): ElevenLabs Conversational AI agent (STT + RAG + TTS) → category tag extraction → pre-recorded response
+- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"video"` | `"live"` | `"tavus"` | `"haiku"` | `"audio"`
+- Unauthenticated API routes under `/api/v1/demo/` (tts, avatar, tavus, transcribe, match)
+- `useDemo()` hook orchestrates voice input, response matching, and avatar playback
+- `useVoiceListener()` provides continuous voice capture with amplitude-based VAD
+- `bedrock-matcher.ts` loads `demoResponses` + `demoQuestionPatterns` from DB (cached), sends to Bedrock Haiku for classification
+- Dual-layer `AvatarPanel` (idle video loops underneath, response video plays on top) eliminates flicker
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
-- Web Speech API for voice input (Chrome/Edge); graceful degradation to text-only
-- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"video"` | `"live"` | `"tavus"` | `"audio"`
-- Tavus CVI uses Daily.co WebRTC for streaming; echo mode sends text for lip-synced speech
-- Env vars: `VOICEFLOW_API_KEY`, `HEYGEN_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
+- Env vars: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`
+- AWS env vars (haiku/live modes): `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BEDROCK_MODEL_ID` (optional)
+- LiveAvatar env vars: `LIVEAVATAR_API_KEY`, `NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID`
 - Tavus env vars: `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
 
 ## Environment Variables

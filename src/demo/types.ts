@@ -30,5 +30,6 @@ export interface AvatarSession {
 
 export type DemoStatus =
   | "ready"
+  | "listening"
   | "processing"
   | "speaking";

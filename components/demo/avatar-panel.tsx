@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import type { DemoStatus } from "@/src/demo/types";
 
 interface AvatarPanelProps {
@@ -15,6 +15,16 @@ interface AvatarPanelProps {
   onVideoEnded?: () => void;
 }
 
+/**
+ * Two-layer video panel that eliminates flicker on transitions.
+ *
+ * Layer 1 (back):  Idle video loops continuously, always loaded.
+ * Layer 2 (front): Response video plays on top, hidden when not active.
+ *
+ * When a response arrives, the response video loads and plays over the idle loop.
+ * When it ends, it hides — revealing the idle loop still running underneath.
+ * No src-swapping on a single element = no flicker.
+ */
 export function AvatarPanel({
   status,
   mediaStream,
@@ -22,120 +32,98 @@ export function AvatarPanel({
   idleVideoSrc = "/video/idle.mp4",
   onVideoEnded,
 }: AvatarPanelProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // Pending response video — waits for current idle loop to finish before playing
-  const pendingVideoRef = useRef<string | null>(null);
-  const isPlayingResponseRef = useRef(false);
+  const idleRef = useRef<HTMLVideoElement>(null);
+  const responseRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<HTMLVideoElement>(null);
+  const [showResponse, setShowResponse] = useState(false);
 
   // Handle live media stream (HeyGen LiveAvatar or Tavus CVI via Daily.co)
   useEffect(() => {
-    if (videoRef.current && mediaStream) {
-      videoRef.current.srcObject = mediaStream;
-      // Unmute so the avatar's audio plays through
-      videoRef.current.muted = false;
+    if (streamRef.current && mediaStream) {
+      streamRef.current.srcObject = mediaStream;
+      streamRef.current.muted = false;
     }
   }, [mediaStream]);
 
-  const playResponse = useCallback((src: string) => {
-    const video = videoRef.current;
-    if (!video) return;
-    isPlayingResponseRef.current = true;
-    pendingVideoRef.current = null;
-    video.loop = false;
-    video.muted = false;
-    video.src = src;
-    video.load();
-    video.play().catch((err) => {
-      console.warn("Response video play blocked:", err);
-      isPlayingResponseRef.current = false;
-      onVideoEnded?.();
-    });
-  }, [onVideoEnded]);
-
-  const switchToIdle = useCallback((video: HTMLVideoElement) => {
-    isPlayingResponseRef.current = false;
-    video.loop = true;
-    video.muted = true;
-    video.src = idleVideoSrc;
-    video.load();
-    video.play().catch(() => {});
-  }, [idleVideoSrc]);
-
-  // When videoSrc changes, either queue it (if idle is playing) or switch to idle
+  // Start idle loop on mount
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || mediaStream) return;
+    const idle = idleRef.current;
+    if (!idle || mediaStream) return;
+    idle.src = idleVideoSrc;
+    idle.loop = true;
+    idle.muted = true;
+    idle.load();
+    idle.play().catch(() => {});
+  }, [idleVideoSrc, mediaStream]);
+
+  // When videoSrc changes, load and play the response video on top
+  useEffect(() => {
+    const response = responseRef.current;
+    if (!response || mediaStream) return;
 
     if (videoSrc) {
-      if (isPlayingResponseRef.current) {
-        // Already playing a response — queue the new one
-        pendingVideoRef.current = videoSrc;
-      } else {
-        // Idle is looping — queue and let it finish the current loop.
-        // The onEnded handler will pick it up.
-        pendingVideoRef.current = videoSrc;
-        // Stop looping so the current iteration ends naturally
-        video.loop = false;
-      }
-    } else if (!isPlayingResponseRef.current && video.src !== new URL(idleVideoSrc, location.href).href) {
-      // No videoSrc and not playing a response — ensure idle is running
-      switchToIdle(video);
+      response.src = videoSrc;
+      response.muted = false;
+      response.load();
+      response.play()
+        .then(() => setShowResponse(true))
+        .catch((err) => {
+          console.warn("Response video play blocked:", err);
+          onVideoEnded?.();
+        });
     }
-  }, [videoSrc, idleVideoSrc, mediaStream, switchToIdle]);
+  }, [videoSrc, mediaStream, onVideoEnded]);
 
-  // Start idle on mount
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || mediaStream) return;
-    switchToIdle(video);
-  }, [idleVideoSrc, mediaStream, switchToIdle]);
-
-  const handleVideoEnded = useCallback(() => {
-    const video = videoRef.current;
-
-    if (isPlayingResponseRef.current) {
-      // Response video finished — notify caller, then check for pending or go idle
-      isPlayingResponseRef.current = false;
-      onVideoEnded?.();
-
-      if (pendingVideoRef.current) {
-        playResponse(pendingVideoRef.current);
-      } else if (video) {
-        switchToIdle(video);
-      }
-      return;
+  const handleResponseEnded = useCallback(() => {
+    setShowResponse(false);
+    // Clear src so the response element doesn't hold a stale last-frame
+    const response = responseRef.current;
+    if (response) {
+      response.removeAttribute("src");
+      response.load();
     }
+    onVideoEnded?.();
+  }, [onVideoEnded]);
 
-    // Idle loop iteration ended — check if a response video is queued
-    if (pendingVideoRef.current) {
-      playResponse(pendingVideoRef.current);
-    } else if (video) {
-      // No pending video — restart idle loop
-      switchToIdle(video);
-    }
-  }, [onVideoEnded, playResponse, switchToIdle]);
+  const handleResponseError = useCallback(() => {
+    setShowResponse(false);
+    onVideoEnded?.();
+  }, [onVideoEnded]);
 
-  const handleVideoError = useCallback(() => {
-    if (isPlayingResponseRef.current) {
-      isPlayingResponseRef.current = false;
-      pendingVideoRef.current = null;
-      onVideoEnded?.();
-    }
-    const video = videoRef.current;
-    if (video) {
-      switchToIdle(video);
-    }
-  }, [onVideoEnded, switchToIdle]);
+  // Live stream mode — single video element
+  if (mediaStream) {
+    return (
+      <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
+        <video
+          ref={streamRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-contain bg-[var(--oc-dark)]"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
+      {/* Layer 1: Idle loop — always running underneath */}
       <video
-        ref={videoRef}
+        ref={idleRef}
         autoPlay
+        loop
+        muted
         playsInline
-        onEnded={handleVideoEnded}
-        onError={handleVideoError}
         className="absolute inset-0 w-full h-full object-contain bg-[var(--oc-dark)]"
+      />
+      {/* Layer 2: Response video — plays on top, hidden when inactive */}
+      <video
+        ref={responseRef}
+        playsInline
+        onEnded={handleResponseEnded}
+        onError={handleResponseError}
+        className={`absolute inset-0 w-full h-full object-contain bg-[var(--oc-dark)] transition-opacity duration-150 ${
+          showResponse ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, Loader2 } from "lucide-react";
+import { Mic, Loader2, CircleDot } from "lucide-react";
 import type { DemoStatus } from "@/src/demo/types";
 
 interface StatusBadgeProps {
@@ -9,6 +9,15 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status }: StatusBadgeProps) {
   if (status === "ready") {
+    return (
+      <span className="flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60">
+        <CircleDot className="h-3.5 w-3.5" />
+        Ready
+      </span>
+    );
+  }
+
+  if (status === "listening") {
     return (
       <span className="flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-400 animate-pulse">
         <Mic className="h-3.5 w-3.5" />

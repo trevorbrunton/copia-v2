@@ -12,7 +12,8 @@ import { Mic, PhoneOff } from "lucide-react";
 export function DemoPage() {
   const {
     status, messages, error, connect, disconnect, isConnected,
-    avatarStream, currentVideoSrc, handleVideoEnded,
+    avatarStream, attachAvatar, avatarReady,
+    currentVideoSrc, handleVideoEnded,
   } = useDemo();
 
   return (
@@ -36,6 +37,8 @@ export function DemoPage() {
           <AvatarPanel
             status={status}
             mediaStream={avatarStream}
+            attachAvatar={USE_LIVE_AVATAR ? attachAvatar : undefined}
+            avatarReady={avatarReady}
             expectsStream={USE_TAVUS_AVATAR || USE_LIVE_AVATAR}
             videoSrc={currentVideoSrc}
             onVideoEnded={handleVideoEnded}

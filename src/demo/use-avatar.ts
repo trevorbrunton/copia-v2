@@ -10,17 +10,19 @@ export type AvatarStatus = "idle" | "loading" | "ready" | "speaking" | "error";
 
 interface UseAvatarReturn {
   status: AvatarStatus;
-  mediaStream: MediaStream | null;
   error: string | null;
+  /** true once SESSION_STREAM_READY has fired and attach() will work */
+  isReady: boolean;
   initAvatar: () => Promise<boolean>;
-  speak: (text: string) => void;
-  speakAudio: (pcmBase64: string) => void;
+  /** Attach the avatar's video+audio to a <video> element (call once stream is ready) */
+  attach: (element: HTMLVideoElement) => void;
+  speakAudio: (pcmBinaryStr: string) => void;
   stopAvatar: () => Promise<void>;
 }
 
 export function useAvatar(): UseAvatarReturn {
   const [status, setStatus] = useState<AvatarStatus>("idle");
-  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<LiveAvatarSessionType | null>(null);
   const initializingRef = useRef(false);
@@ -62,33 +64,15 @@ export function useAvatar(): UseAvatarReturn {
 
         session.on(SessionEvent.SESSION_STREAM_READY, () => {
           clearTimeout(timeout);
-          // Get the media stream from the LiveKit room
-          const room = (session as unknown as {
-            room: {
-              remoteParticipants: Map<string, {
-                videoTrackPublications: Map<string, {
-                  track?: { mediaStream?: MediaStream }
-                }>
-              }>
-            }
-          }).room;
-          if (room) {
-            for (const [, participant] of room.remoteParticipants) {
-              for (const [, pub] of participant.videoTrackPublications) {
-                if (pub.track?.mediaStream) {
-                  setMediaStream(pub.track.mediaStream);
-                }
-              }
-            }
-          }
           setStatus("ready");
+          setIsReady(true);
           resolve(true);
         });
 
         session.on(SessionEvent.SESSION_DISCONNECTED, () => {
           clearTimeout(timeout);
           setStatus("idle");
-          setMediaStream(null);
+          setIsReady(false);
           sessionRef.current = null;
           resolve(false);
         });
@@ -110,29 +94,24 @@ export function useAvatar(): UseAvatarReturn {
     }
   }, []);
 
-  // Send text for the avatar to speak via TTS + lip-sync
-  const speak = useCallback((text: string) => {
+  // Use the SDK's attach() to wire both video+audio tracks to a <video> element
+  const attach = useCallback((element: HTMLVideoElement) => {
     const session = sessionRef.current;
     if (!session) {
-      console.warn("Session is not connected");
+      console.warn("Cannot attach: session is not connected");
       return;
     }
-
-    try {
-      setStatus("speaking");
-      session.repeat(text);
-      const estimatedDuration = Math.max(3000, text.length * 60);
-      setTimeout(() => {
-        setStatus((prev) => (prev === "speaking" ? "ready" : prev));
-      }, estimatedDuration);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Speak failed";
-      setError(msg);
-      setStatus("ready");
-    }
+    session.attach(element);
   }, []);
 
-  // Send pre-generated PCM audio for the avatar to lip-sync
+  /**
+   * Send PCM audio (base64-encoded) directly to the WebSocket.
+   *
+   * The SDK's `repeatAudio()` has a bug: it splits base64 at raw-byte boundaries
+   * (960-char chunks) instead of base64-aligned boundaries, corrupting the encoding.
+   * We bypass it and send properly chunked base64 directly per the HeyGen docs:
+   * "PCM 16Bit 24KHz bytes encoded as Base64", ~1 second chunks, < 1MB per message.
+   */
   const speakAudio = useCallback((pcmBase64: string) => {
     const session = sessionRef.current;
     if (!session) {
@@ -140,11 +119,39 @@ export function useAvatar(): UseAvatarReturn {
       return;
     }
 
+    // Access the WebSocket directly
+    const ws = (session as unknown as { _sessionEventSocket: WebSocket | null })
+      ._sessionEventSocket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket not open for audio");
+      return;
+    }
+
     try {
       setStatus("speaking");
-      session.repeatAudio(pcmBase64);
-      // Estimate duration from PCM size: 24kHz, 16-bit mono = 48000 bytes/sec
-      const pcmBytes = (pcmBase64.length * 3) / 4; // base64 → bytes
+
+      const eventId = crypto.randomUUID();
+      // ~1 second of audio at 24kHz 16-bit mono = 48000 bytes = 64000 base64 chars
+      // Use 64000 chars per chunk (must be multiple of 4 for valid base64)
+      const CHUNK_SIZE = 64000;
+
+      for (let i = 0; i < pcmBase64.length; i += CHUNK_SIZE) {
+        const chunk = pcmBase64.slice(i, i + CHUNK_SIZE);
+        ws.send(JSON.stringify({
+          type: "agent.speak",
+          event_id: eventId,
+          audio: chunk,
+        }));
+      }
+
+      // Signal end of audio
+      ws.send(JSON.stringify({
+        type: "agent.speak_end",
+        event_id: eventId,
+      }));
+
+      // Estimate duration: base64 length * 3/4 = PCM bytes, 48000 bytes/sec
+      const pcmBytes = (pcmBase64.length * 3) / 4;
       const durationMs = Math.max(3000, (pcmBytes / 48000) * 1000);
       setTimeout(() => {
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));
@@ -166,7 +173,7 @@ export function useAvatar(): UseAvatarReturn {
       // Best-effort cleanup
     }
     sessionRef.current = null;
-    setMediaStream(null);
+    setIsReady(false);
     setStatus("idle");
   }, []);
 
@@ -182,10 +189,10 @@ export function useAvatar(): UseAvatarReturn {
 
   return {
     status,
-    mediaStream,
+    isReady,
     error,
     initAvatar,
-    speak,
+    attach,
     speakAudio,
     stopAvatar,
   };

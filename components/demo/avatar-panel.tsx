@@ -6,8 +6,12 @@ import type { DemoStatus } from "@/src/demo/types";
 
 interface AvatarPanelProps {
   status: DemoStatus;
-  /** LiveAvatar media stream (live mode) */
+  /** Tavus media stream (tavus mode) */
   mediaStream?: MediaStream | null;
+  /** LiveAvatar attach function (live mode) — SDK manages tracks internally */
+  attachAvatar?: (element: HTMLVideoElement) => void;
+  /** True once the LiveAvatar session is ready for attach */
+  avatarReady?: boolean;
   /** True when a live stream is expected (tavus/live modes) — suppresses idle video */
   expectsStream?: boolean;
   /** Current MP4 video source — null means show idle loop */
@@ -31,6 +35,8 @@ interface AvatarPanelProps {
 export function AvatarPanel({
   status,
   mediaStream,
+  attachAvatar,
+  avatarReady = false,
   expectsStream = false,
   videoSrc,
   idleVideoSrc = "/video/idle.mp4",
@@ -39,9 +45,11 @@ export function AvatarPanel({
   const idleRef = useRef<HTMLVideoElement>(null);
   const responseRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<HTMLVideoElement>(null);
+  const liveAvatarRef = useRef<HTMLVideoElement>(null);
+  const attachedRef = useRef(false);
   const [showResponse, setShowResponse] = useState(false);
 
-  // Handle live media stream (HeyGen LiveAvatar or Tavus CVI via Daily.co)
+  // Handle Tavus media stream
   useEffect(() => {
     if (streamRef.current && mediaStream) {
       streamRef.current.srcObject = mediaStream;
@@ -49,21 +57,29 @@ export function AvatarPanel({
     }
   }, [mediaStream]);
 
+  // Handle LiveAvatar attach — SDK manages its own tracks via session.attach()
+  useEffect(() => {
+    if (liveAvatarRef.current && attachAvatar && avatarReady && !attachedRef.current) {
+      attachAvatar(liveAvatarRef.current);
+      attachedRef.current = true;
+    }
+  }, [attachAvatar, avatarReady]);
+
   // Start idle loop on mount
   useEffect(() => {
     const idle = idleRef.current;
-    if (!idle || mediaStream) return;
+    if (!idle || mediaStream || expectsStream) return;
     idle.src = idleVideoSrc;
     idle.loop = true;
     idle.muted = true;
     idle.load();
     idle.play().catch(() => {});
-  }, [idleVideoSrc, mediaStream]);
+  }, [idleVideoSrc, mediaStream, expectsStream]);
 
   // When videoSrc changes, load and play the response video on top
   useEffect(() => {
     const response = responseRef.current;
-    if (!response || mediaStream) return;
+    if (!response || mediaStream || expectsStream) return;
 
     if (videoSrc) {
       response.src = videoSrc;
@@ -76,7 +92,7 @@ export function AvatarPanel({
           onVideoEnded?.();
         });
     }
-  }, [videoSrc, mediaStream, onVideoEnded]);
+  }, [videoSrc, mediaStream, expectsStream, onVideoEnded]);
 
   const handleResponseEnded = useCallback(() => {
     setShowResponse(false);
@@ -94,7 +110,27 @@ export function AvatarPanel({
     onVideoEnded?.();
   }, [onVideoEnded]);
 
-  // Live stream mode (tavus/live) — single video element, loader until stream arrives
+  // LiveAvatar mode — SDK attaches tracks directly to the <video> element
+  if (attachAvatar) {
+    return (
+      <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
+        {!avatarReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
+            <Loader2 className="h-8 w-8 text-white/40 animate-spin" />
+            <p className="text-sm text-white/40">Connecting avatar...</p>
+          </div>
+        )}
+        <video
+          ref={liveAvatarRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-contain bg-[var(--oc-dark)]"
+        />
+      </div>
+    );
+  }
+
+  // Tavus stream mode — srcObject from Daily.co WebRTC
   if (mediaStream || expectsStream) {
     return (
       <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">

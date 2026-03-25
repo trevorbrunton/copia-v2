@@ -36,24 +36,6 @@ function createMessage(
   };
 }
 
-/**
- * Fetch a PCM file and return as base64 string (for LiveAvatar mode).
- * Uses chunked conversion to avoid O(n²) string concatenation.
- */
-async function fetchPcmAsBase64(pcmUrl: string): Promise<string> {
-  const res = await fetch(pcmUrl);
-  if (!res.ok) throw new Error(`Failed to fetch PCM: ${res.status}`);
-  const buffer = await res.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const CHUNK_SIZE = 8192;
-  const chunks: string[] = [];
-  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-    const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
-    chunks.push(String.fromCharCode(...chunk));
-  }
-  return btoa(chunks.join(""));
-}
-
 export function useDemo() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -311,18 +293,25 @@ export function useDemo() {
     });
   }, []);
 
-  const playPcmOnAvatar = useCallback(
+  const playPcmOnLiveAvatar = useCallback(
     async (pcmUrl: string): Promise<void> => {
+      // Fetch pre-recorded PCM (24kHz 16-bit mono) from CloudFront, base64 encode, send to avatar
       let base64 = pcmCacheRef.current[pcmUrl];
       if (!base64) {
-        base64 = await fetchPcmAsBase64(pcmUrl);
+        const res = await fetch(pcmUrl);
+        if (!res.ok) throw new Error(`Failed to fetch PCM: ${res.status}`);
+        const buffer = await res.arrayBuffer();
+        base64 = btoa(
+          new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), "")
+        );
         pcmCacheRef.current[pcmUrl] = base64;
       }
       avatar.speakAudio(base64);
-      // Wait for estimated playback duration before resolving.
-      // PCM files are 24kHz 16-bit mono → 48,000 bytes/sec.
-      const pcmBytes = atob(base64).length;
-      const durationMs = Math.max(3000, (pcmBytes / (24000 * 2)) * 1000);
+      // Wait for estimated playback duration.
+      // PCM is 24kHz 16-bit mono → 48,000 bytes/sec.
+      // base64 length * 3/4 = original byte count
+      const pcmBytes = (base64.length * 3) / 4;
+      const durationMs = Math.max(3000, (pcmBytes / 48000) * 1000);
       await new Promise((resolve) => setTimeout(resolve, durationMs));
     },
     [avatar]
@@ -368,7 +357,7 @@ export function useDemo() {
         }
       } else if (USE_LIVE_AVATAR && avatarReadyRef.current) {
         try {
-          await playPcmOnAvatar(cached.pcmUrl);
+          await playPcmOnLiveAvatar(cached.pcmUrl);
         } catch {
           await playCachedAudio(cached.audioUrl).catch(() => {});
         }
@@ -383,7 +372,7 @@ export function useDemo() {
         if (isConnectedRef.current) conv.setVolume({ volume: 1 });
       }
     },
-    [playCachedAudio, playPcmOnAvatar, playTextOnTavus]
+    [playCachedAudio, playPcmOnLiveAvatar, playTextOnTavus]
   );
 
   const playResponseRef = useRef(playResponse);
@@ -413,7 +402,7 @@ export function useDemo() {
     try {
       // Init avatar renderers before greeting so playResponse routes correctly.
       // Must complete before greeting plays — avatar needs to be "ready" for
-      // playResponse to route to playPcmOnAvatar/playTextOnTavus.
+      // playResponse to route to playTextOnLiveAvatar/playTextOnTavus.
       if (USE_TAVUS_AVATAR) {
         avatarReadyRef.current = await tavusAvatar.initAvatar();
         if (!avatarReadyRef.current) {
@@ -543,7 +532,10 @@ export function useDemo() {
     isConnected: hasStarted,
     avatarStream: USE_TAVUS_AVATAR
       ? tavusAvatar.mediaStream
-      : avatar.mediaStream,
+      : null,
+    /** Attach LiveAvatar session to a <video> element (live mode only) */
+    attachAvatar: avatar.attach,
+    avatarReady: avatar.isReady,
     currentVideoSrc,
     handleVideoEnded,
     // Local pipeline (haiku + live) — expose listening/speaking state for UI

@@ -7,11 +7,11 @@ import { ChatPanel } from "./chat-panel";
 import { StatusBadge } from "./status-badge";
 import { ErrorBanner } from "./error-banner";
 import { Button } from "@/components/ui/button";
-import { Mic } from "lucide-react";
+import { Mic, PhoneOff } from "lucide-react";
 
 export function DemoPage() {
   const {
-    status, messages, error, connect, isConnected,
+    status, messages, error, connect, disconnect, isConnected,
     avatarStream, currentVideoSrc, handleVideoEnded,
   } = useDemo();
 
@@ -53,10 +53,21 @@ export function DemoPage() {
               Ask {PERSONA.name}
             </h2>
             {isConnected && (
-              <span className="ml-auto flex items-center gap-1.5 text-xs text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Connected
-              </span>
+              <div className="ml-auto flex items-center gap-3">
+                <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Connected
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={disconnect}
+                  className="text-red-400 hover:text-red-300 hover:bg-red-400/10 gap-1.5 text-xs"
+                >
+                  <PhoneOff className="h-3.5 w-3.5" />
+                  Leave
+                </Button>
+              </div>
             )}
           </div>
 

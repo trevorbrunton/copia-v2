@@ -480,6 +480,47 @@ export function useDemo() {
     }
   }, [conversation, playResponse, avatar, tavusAvatar, voiceListener, setBusy]);
 
+  // ─── Disconnect ──────────────────────────────────────────────────
+
+  const disconnect = useCallback(async () => {
+    // Stop audio playback
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    // Stop voice listener (local pipeline)
+    if (USE_LOCAL_PIPELINE) {
+      voiceListener.stop();
+    }
+
+    // End ElevenLabs agent session
+    if (!USE_LOCAL_PIPELINE && isConnectedRef.current) {
+      try {
+        await conversation.endSession();
+      } catch {
+        // Safe to ignore
+      }
+    }
+
+    // Stop avatars
+    if (USE_LIVE_AVATAR && avatarReadyRef.current) {
+      avatar.stopAvatar().catch(() => {});
+      avatarReadyRef.current = false;
+    }
+
+    // Reset state
+    setCurrentVideoSrc(null);
+    setIsPlayingCached(false);
+    setIsProcessing(false);
+    setBusy(false);
+    setMicMuted(true);
+    setHasStarted(false);
+    setMessages([]);
+    setError(null);
+    isConnectingRef.current = false;
+  }, [conversation, voiceListener, avatar, tavusAvatar, setBusy]);
+
   // ─── Status ───────────────────────────────────────────────────────
 
   const demoStatus: DemoStatus = isProcessing
@@ -498,6 +539,7 @@ export function useDemo() {
     messages,
     error: error || avatar.error || tavusAvatar.error,
     connect,
+    disconnect,
     isConnected: hasStarted,
     avatarStream: USE_TAVUS_AVATAR
       ? tavusAvatar.mediaStream

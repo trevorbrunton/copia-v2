@@ -3,7 +3,7 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { MessageSquare, LayoutDashboard, Settings } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Settings, Cog } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +21,7 @@ import { ThemeToggle } from "./theme-toggle";
 const navItems = [
   { title: "Demo", url: "/demo", icon: MessageSquare },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Config", url: "/config", icon: Cog },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 

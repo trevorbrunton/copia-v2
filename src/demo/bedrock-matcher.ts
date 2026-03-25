@@ -51,6 +51,11 @@ interface CachedData {
 
 let cachedData: CachedData | null = null;
 
+/** Clear the cached data so the next match re-reads from the database. */
+export function clearMatcherCache(): void {
+  cachedData = null;
+}
+
 async function getCachedData(): Promise<CachedData> {
   if (cachedData) return cachedData;
 

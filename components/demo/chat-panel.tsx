@@ -2,7 +2,6 @@
 
 import { useRef, useEffect } from "react";
 import type { ChatMessage, DemoStatus } from "@/src/demo/types";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -20,10 +19,13 @@ function TypingIndicator() {
 }
 
 export function ChatPanel({ messages, status }: ChatPanelProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages.length, status]);
 
   if (messages.length === 0 && status !== "processing") {
@@ -35,7 +37,7 @@ export function ChatPanel({ messages, status }: ChatPanelProps) {
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
       <div className="flex flex-col gap-3 p-4">
         {messages.map((msg) => (
           <div
@@ -50,8 +52,7 @@ export function ChatPanel({ messages, status }: ChatPanelProps) {
           </div>
         ))}
         {status === "processing" && <TypingIndicator />}
-        <div ref={bottomRef} />
       </div>
-    </ScrollArea>
+    </div>
   );
 }

@@ -1,78 +1,140 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Volume2 } from "lucide-react";
+import { useEffect, useRef, useCallback } from "react";
 import type { DemoStatus } from "@/src/demo/types";
-import { PERSONA } from "@/src/demo/config";
-
-const STATUS_LABELS: Record<DemoStatus, string> = {
-  initialising: "Starting up…",
-  ready: "Ready",
-  listening: "Listening…",
-  processing: "Thinking…",
-  speaking: "Speaking…",
-  error: "Unavailable",
-};
 
 interface AvatarPanelProps {
   status: DemoStatus;
+  /** LiveAvatar media stream (live mode) */
   mediaStream?: MediaStream | null;
+  /** Current MP4 video source — null means show idle loop */
+  videoSrc?: string | null;
+  /** Idle video to loop between responses */
+  idleVideoSrc?: string;
+  /** Called when a response video finishes playing */
+  onVideoEnded?: () => void;
 }
 
-export function AvatarPanel({ status, mediaStream }: AvatarPanelProps) {
+export function AvatarPanel({
+  status,
+  mediaStream,
+  videoSrc,
+  idleVideoSrc = "/video/idle.mp4",
+  onVideoEnded,
+}: AvatarPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Pending response video — waits for current idle loop to finish before playing
+  const pendingVideoRef = useRef<string | null>(null);
+  const isPlayingResponseRef = useRef(false);
 
+  // Handle LiveAvatar media stream
   useEffect(() => {
     if (videoRef.current && mediaStream) {
       videoRef.current.srcObject = mediaStream;
     }
   }, [mediaStream]);
 
-  const hasVideo = !!mediaStream;
+  const playResponse = useCallback((src: string) => {
+    const video = videoRef.current;
+    if (!video) return;
+    isPlayingResponseRef.current = true;
+    pendingVideoRef.current = null;
+    video.loop = false;
+    video.muted = false;
+    video.src = src;
+    video.load();
+    video.play().catch((err) => {
+      console.warn("Response video play blocked:", err);
+      isPlayingResponseRef.current = false;
+      onVideoEnded?.();
+    });
+  }, [onVideoEnded]);
+
+  const switchToIdle = useCallback((video: HTMLVideoElement) => {
+    isPlayingResponseRef.current = false;
+    video.loop = true;
+    video.muted = true;
+    video.src = idleVideoSrc;
+    video.load();
+    video.play().catch(() => {});
+  }, [idleVideoSrc]);
+
+  // When videoSrc changes, either queue it (if idle is playing) or switch to idle
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || mediaStream) return;
+
+    if (videoSrc) {
+      if (isPlayingResponseRef.current) {
+        // Already playing a response — queue the new one
+        pendingVideoRef.current = videoSrc;
+      } else {
+        // Idle is looping — queue and let it finish the current loop.
+        // The onEnded handler will pick it up.
+        pendingVideoRef.current = videoSrc;
+        // Stop looping so the current iteration ends naturally
+        video.loop = false;
+      }
+    } else if (!isPlayingResponseRef.current && video.src !== new URL(idleVideoSrc, location.href).href) {
+      // No videoSrc and not playing a response — ensure idle is running
+      switchToIdle(video);
+    }
+  }, [videoSrc, idleVideoSrc, mediaStream, switchToIdle]);
+
+  // Start idle on mount
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || mediaStream) return;
+    switchToIdle(video);
+  }, [idleVideoSrc, mediaStream, switchToIdle]);
+
+  const handleVideoEnded = useCallback(() => {
+    const video = videoRef.current;
+
+    if (isPlayingResponseRef.current) {
+      // Response video finished — notify caller, then check for pending or go idle
+      isPlayingResponseRef.current = false;
+      onVideoEnded?.();
+
+      if (pendingVideoRef.current) {
+        playResponse(pendingVideoRef.current);
+      } else if (video) {
+        switchToIdle(video);
+      }
+      return;
+    }
+
+    // Idle loop iteration ended — check if a response video is queued
+    if (pendingVideoRef.current) {
+      playResponse(pendingVideoRef.current);
+    } else if (video) {
+      // No pending video — restart idle loop
+      switchToIdle(video);
+    }
+  }, [onVideoEnded, playResponse, switchToIdle]);
+
+  const handleVideoError = useCallback(() => {
+    if (isPlayingResponseRef.current) {
+      isPlayingResponseRef.current = false;
+      pendingVideoRef.current = null;
+      onVideoEnded?.();
+    }
+    const video = videoRef.current;
+    if (video) {
+      switchToIdle(video);
+    }
+  }, [onVideoEnded, switchToIdle]);
 
   return (
     <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
-      {hasVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-      ) : (
-        <div className="flex flex-col items-center justify-center">
-          <div className="relative flex h-32 w-32 items-center justify-center rounded-full bg-[var(--oc-navy)] border-2 border-white/20 overflow-hidden">
-            <span className="text-4xl font-bold text-white/30">RF</span>
-            {status === "speaking" && (
-              <div className="absolute inset-0 rounded-full border-2 border-white/40 animate-ping" />
-            )}
-          </div>
-          <p className="mt-4 text-white font-medium">{PERSONA.name}</p>
-          <p className="text-white/60 text-sm">{PERSONA.title}</p>
-          {status === "speaking" && (
-            <div className="mt-2 flex items-center gap-1.5 text-white/50 text-xs">
-              <Volume2 className="h-3.5 w-3.5" />
-              <span>Speaking…</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Status indicator */}
-      <div className="absolute bottom-4 left-4 flex items-center gap-2">
-        <span
-          className={`h-2.5 w-2.5 rounded-full ${
-            status === "processing" || status === "speaking"
-              ? "bg-amber-400 animate-pulse"
-              : status === "error"
-                ? "bg-red-400"
-                : "bg-emerald-400"
-          }`}
-        />
-        <span className="text-xs text-white/60">
-          {STATUS_LABELS[status]}
-        </span>
-      </div>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        onEnded={handleVideoEnded}
+        onError={handleVideoError}
+        className="absolute inset-0 w-full h-full object-contain bg-[var(--oc-dark)]"
+      />
     </div>
   );
 }

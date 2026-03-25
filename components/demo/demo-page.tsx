@@ -4,17 +4,19 @@ import { useDemo } from "@/src/demo/use-demo";
 import { PERSONA } from "@/src/demo/config";
 import { AvatarPanel } from "./avatar-panel";
 import { ChatPanel } from "./chat-panel";
-import { ChatInput } from "./chat-input";
+import { StatusBadge } from "./status-badge";
 import { ErrorBanner } from "./error-banner";
 import { Button } from "@/components/ui/button";
 import { Mic } from "lucide-react";
 
 export function DemoPage() {
-  const { status, messages, error, sendMessage, connect, isConnected, avatarStream } =
-    useDemo();
+  const {
+    status, messages, error, connect, isConnected,
+    avatarStream, currentVideoSrc, handleVideoEnded,
+  } = useDemo();
 
   return (
-    <div className="flex min-h-svh flex-col bg-[var(--oc-dark)]">
+    <div className="flex h-svh flex-col bg-[var(--oc-dark)] overflow-hidden">
       <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white font-bold text-[var(--oc-navy)] text-sm">
@@ -30,8 +32,18 @@ export function DemoPage() {
       </header>
 
       <main className="flex flex-1 flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6 overflow-hidden">
-        <div className="w-full lg:w-1/2 xl:w-3/5 shrink-0">
-          <AvatarPanel status={status} mediaStream={avatarStream} />
+        <div className="w-full lg:w-1/2 xl:w-3/5 shrink-0 flex flex-col items-center">
+          <AvatarPanel
+            status={status}
+            mediaStream={avatarStream}
+            videoSrc={currentVideoSrc}
+            onVideoEnded={handleVideoEnded}
+          />
+          {isConnected && (
+            <div className="mt-3">
+              <StatusBadge status={status} />
+            </div>
+          )}
         </div>
 
         <div className="flex flex-1 flex-col mt-4 lg:mt-0 rounded-2xl border border-white/10 bg-[var(--oc-navy)] overflow-hidden min-h-0">
@@ -65,10 +77,7 @@ export function DemoPage() {
               </Button>
             </div>
           ) : (
-            <>
-              <ChatPanel messages={messages} status={status} />
-              <ChatInput onSend={sendMessage} status={status} />
-            </>
+            <ChatPanel messages={messages} status={status} />
           )}
         </div>
       </main>

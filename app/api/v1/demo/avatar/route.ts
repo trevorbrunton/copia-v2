@@ -29,7 +29,7 @@ export async function POST() {
       );
     }
 
-    logger.info({ traceId }, "demo:avatar session request");
+    logger.info({ traceId, avatarId: AVATAR_ID }, "demo:avatar session request");
 
     const res = await fetch("https://api.liveavatar.com/v1/sessions/token", {
       method: "POST",
@@ -46,6 +46,7 @@ export async function POST() {
 
     if (!res.ok) {
       const body = await res.json().catch(() => null);
+      logger.error({ traceId, status: res.status, body }, "demo:avatar API error");
       throw new ExternalServiceError(
         `LiveAvatar API error: ${res.status} ${body?.message ?? res.statusText}`,
         "liveavatar"
@@ -53,6 +54,7 @@ export async function POST() {
     }
 
     const body = await res.json();
+    logger.info({ traceId, hasData: !!body.data, hasToken: !!body.data?.session_token }, "demo:avatar API response");
     const sessionToken = body.data?.session_token;
 
     if (!sessionToken) {

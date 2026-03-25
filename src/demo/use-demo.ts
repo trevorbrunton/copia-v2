@@ -330,6 +330,13 @@ export function useDemo() {
 
   const playResponse = useCallback(
     async (cached: { audioUrl: string; pcmUrl: string; videoUrl: string; text: string }) => {
+      console.log("[demo:playResponse] Routing decision:", {
+        USE_VIDEO_AVATAR, USE_HAIKU_MODE, USE_TAVUS_AVATAR, USE_LIVE_AVATAR,
+        avatarReady: avatarReadyRef.current,
+        hasVideoUrl: !!cached.videoUrl,
+        hasPcmUrl: !!cached.pcmUrl,
+        hasAudioUrl: !!cached.audioUrl,
+      });
       // Haiku plays pre-recorded video; live sends PCM to avatar (handled below)
       if (USE_VIDEO_AVATAR || USE_HAIKU_MODE) {
         let hasVideo = false;
@@ -403,16 +410,26 @@ export function useDemo() {
       // Init avatar renderers before greeting so playResponse routes correctly.
       // Must complete before greeting plays — avatar needs to be "ready" for
       // playResponse to route to playTextOnLiveAvatar/playTextOnTavus.
+      console.log("[demo:connect] Mode flags:", {
+        USE_LIVE_AVATAR, USE_TAVUS_AVATAR, USE_VIDEO_AVATAR,
+        USE_HAIKU_MODE, USE_LOCAL_PIPELINE,
+      });
+
       if (USE_TAVUS_AVATAR) {
         avatarReadyRef.current = await tavusAvatar.initAvatar();
+        console.log("[demo:connect] Tavus initAvatar result:", avatarReadyRef.current);
         if (!avatarReadyRef.current) {
           console.warn("Tavus avatar failed to connect — running in audio-only mode");
         }
       } else if (USE_LIVE_AVATAR) {
+        console.log("[demo:connect] Calling avatar.initAvatar()...");
         avatarReadyRef.current = await avatar.initAvatar();
+        console.log("[demo:connect] LiveAvatar initAvatar result:", avatarReadyRef.current);
         if (!avatarReadyRef.current) {
           console.warn("Avatar failed to connect — running in audio-only mode");
         }
+      } else {
+        console.log("[demo:connect] No live avatar mode — skipping avatar init");
       }
 
       // Play greeting (avatar is ready at this point, so routing is correct)

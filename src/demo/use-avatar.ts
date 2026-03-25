@@ -28,29 +28,43 @@ export function useAvatar(): UseAvatarReturn {
   const initializingRef = useRef(false);
 
   const initAvatar = useCallback(async (): Promise<boolean> => {
+    console.log("[avatar] initAvatar called, AVATAR_ID =", JSON.stringify(AVATAR_ID));
+
     if (!AVATAR_ID) {
+      console.error("[avatar] ABORT: NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID is not configured");
       setError("NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID is not configured");
       return false;
     }
 
-    if (initializingRef.current || sessionRef.current) return false;
+    if (initializingRef.current || sessionRef.current) {
+      console.warn("[avatar] ABORT: already initializing or session exists",
+        { initializing: initializingRef.current, hasSession: !!sessionRef.current });
+      return false;
+    }
     initializingRef.current = true;
     setStatus("loading");
     setError(null);
 
     try {
       // Get session token from our server
+      console.log("[avatar] Fetching session token from /api/demo/avatar...");
       const tokenRes = await fetch("/api/demo/avatar", { method: "POST" });
+      console.log("[avatar] Token response:", tokenRes.status, tokenRes.statusText);
       if (!tokenRes.ok) {
         const body = await tokenRes.json().catch(() => null);
+        console.error("[avatar] Token request failed:", body);
         throw new Error(body?.error?.message ?? `Token request failed: ${tokenRes.status}`);
       }
-      const { sessionToken } = await tokenRes.json();
+      const tokenBody = await tokenRes.json();
+      console.log("[avatar] Got session token:", tokenBody.sessionToken ? "yes (length=" + tokenBody.sessionToken.length + ")" : "NO TOKEN");
+      const { sessionToken } = tokenBody;
 
       // Dynamic import to avoid SSR
+      console.log("[avatar] Importing LiveAvatar SDK...");
       const { LiveAvatarSession, SessionEvent } = await import(
         "@heygen/liveavatar-web-sdk"
       );
+      console.log("[avatar] SDK imported, creating session...");
 
       const session = new LiveAvatarSession(sessionToken);
       sessionRef.current = session;
@@ -58,12 +72,13 @@ export function useAvatar(): UseAvatarReturn {
       // Set up event listeners BEFORE starting
       const ready = new Promise<boolean>((resolve) => {
         const timeout = setTimeout(() => {
-          console.warn("Avatar stream ready timeout (15s)");
+          console.error("[avatar] TIMEOUT: stream ready not received after 15s");
           resolve(false);
         }, 15_000);
 
         session.on(SessionEvent.SESSION_STREAM_READY, () => {
           clearTimeout(timeout);
+          console.log("[avatar] SESSION_STREAM_READY fired");
           setStatus("ready");
           setIsReady(true);
           resolve(true);
@@ -71,6 +86,7 @@ export function useAvatar(): UseAvatarReturn {
 
         session.on(SessionEvent.SESSION_DISCONNECTED, () => {
           clearTimeout(timeout);
+          console.warn("[avatar] SESSION_DISCONNECTED fired");
           setStatus("idle");
           setIsReady(false);
           sessionRef.current = null;
@@ -79,12 +95,16 @@ export function useAvatar(): UseAvatarReturn {
       });
 
       // Start the session — connects to LiveKit and starts the avatar
+      console.log("[avatar] Starting session...");
       await session.start();
+      console.log("[avatar] session.start() resolved, waiting for stream ready...");
 
-      return await ready;
+      const result = await ready;
+      console.log("[avatar] initAvatar result:", result);
+      return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Avatar init failed";
-      console.error("Avatar init error:", err);
+      console.error("[avatar] initAvatar CAUGHT ERROR:", err);
       setError(msg);
       setStatus("error");
       sessionRef.current = null;

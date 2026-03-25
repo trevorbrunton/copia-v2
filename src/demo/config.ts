@@ -35,3 +35,10 @@ export const USE_AUDIO_ONLY = AVATAR_MODE === "audio" || !AVATAR_MODE;
  * Only "video" and "audio" modes still use the agent.
  */
 export const USE_LOCAL_PIPELINE = USE_HAIKU_MODE || USE_LIVE_AVATAR || USE_TAVUS_AVATAR;
+
+// Debug: log resolved avatar mode on load
+if (typeof window !== "undefined") {
+  console.log("[demo:config] AVATAR_MODE =", JSON.stringify(AVATAR_MODE),
+    "| USE_LIVE_AVATAR =", USE_LIVE_AVATAR,
+    "| USE_LOCAL_PIPELINE =", USE_LOCAL_PIPELINE);
+}

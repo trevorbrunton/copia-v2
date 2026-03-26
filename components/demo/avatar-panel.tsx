@@ -6,6 +6,8 @@ import type { DemoStatus } from "@/src/demo/types";
 
 interface AvatarPanelProps {
   status: DemoStatus;
+  /** Whether the demo session is connected */
+  isConnected: boolean;
   /** Tavus media stream (tavus mode) */
   mediaStream?: MediaStream | null;
   /** LiveAvatar attach function (live mode) — SDK manages tracks internally */
@@ -34,6 +36,7 @@ interface AvatarPanelProps {
  */
 export function AvatarPanel({
   status,
+  isConnected,
   mediaStream,
   attachAvatar,
   avatarReady = false,
@@ -114,7 +117,11 @@ export function AvatarPanel({
   if (attachAvatar) {
     return (
       <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
-        {!avatarReady && (
+        {!isConnected ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
+            <p className="text-sm text-white/50">Please press the Start Conversation button</p>
+          </div>
+        ) : !avatarReady && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
             <Loader2 className="h-8 w-8 text-white/40 animate-spin" />
             <p className="text-sm text-white/40">Connecting avatar...</p>
@@ -134,7 +141,11 @@ export function AvatarPanel({
   if (mediaStream || expectsStream) {
     return (
       <div className="relative flex flex-col items-center justify-center rounded-2xl bg-[var(--oc-dark)] aspect-video w-full overflow-hidden">
-        {!mediaStream && (
+        {!isConnected ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
+            <p className="text-sm text-white/50">Please press the Start Conversation button</p>
+          </div>
+        ) : !mediaStream && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
             <Loader2 className="h-8 w-8 text-white/40 animate-spin" />
             <p className="text-sm text-white/40">Connecting avatar...</p>

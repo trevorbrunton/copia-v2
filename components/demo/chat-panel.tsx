@@ -6,6 +6,7 @@ import type { ChatMessage, DemoStatus } from "@/src/demo/types";
 interface ChatPanelProps {
   messages: ChatMessage[];
   status: DemoStatus;
+  isConnected: boolean;
 }
 
 function TypingIndicator() {
@@ -18,7 +19,7 @@ function TypingIndicator() {
   );
 }
 
-export function ChatPanel({ messages, status }: ChatPanelProps) {
+export function ChatPanel({ messages, status, isConnected }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,6 +28,14 @@ export function ChatPanel({ messages, status }: ChatPanelProps) {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages.length, status]);
+
+  if (!isConnected) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-white/40">
+        Press Start Conversation to begin
+      </div>
+    );
+  }
 
   if (messages.length === 0 && status !== "processing") {
     return (

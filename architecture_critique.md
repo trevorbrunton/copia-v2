@@ -147,9 +147,48 @@ This waits for React to flush state so the `<video>` element is wired up before 
 | Response delivery | Pre-recorded MP4/MP3 | Pre-recorded PCM → lip-sync | **Text → echo lip-sync** | Pre-recorded MP3 |
 | Visual continuity | Poor (clip jumps) | Good (continuous stream) | **Good (continuous stream)** | N/A |
 | SDK stability | Native `<video>` | Fragile (private WS hack) | **Stable (Daily.co public API)** | N/A |
+| Data over wire per response | MP4 download | ~300KB PCM download + upload | **~200 bytes of text** | MP3 download |
 | External services | ElevenLabs STT, Bedrock | ElevenLabs STT, Bedrock, HeyGen | **ElevenLabs STT, Bedrock, Tavus** | ElevenLabs |
 
-Tavus and Live both solve the visual continuity problem. Tavus has the edge on SDK stability (Daily.co's public API vs HeyGen's private WebSocket internals) and bandwidth efficiency (sends text instead of PCM audio). Live avoids paying for unused Tavus CVI features, but its SDK workarounds are a maintenance risk.
+---
+
+## Case for Deprecating Live (HeyGen) Mode
+
+Tavus and Live both solve the visual continuity problem, but Tavus is the better fit for this use case on every axis that matters:
+
+### 1. Bandwidth — text vs audio round-trip
+
+Tavus echo sends a short text string (~200 bytes) and generates TTS + lip-sync internally. HeyGen LiveAvatar LITE requires the client to **download** pre-recorded PCM from CloudFront (~300KB per response), then **upload** it over WebSocket to HeyGen. That's two large transfers per response vs near-zero.
+
+Pre-encoding the PCM as base64 on S3 would only save the trivial `btoa()` CPU cost — the client still has to download the inflated file (base64 is ~33% larger than raw PCM) and re-upload it over WebSocket.
+
+### 2. No server-to-server shortcut exists
+
+The obvious optimisation — send audio directly from CDN to HeyGen, bypassing the browser — is impossible. HeyGen LITE's only audio ingest path is the client's WebSocket session. There is no server-to-server API to say "play this URL against session X". The data path is locked to:
+
+```
+CDN → client browser → WebSocket → HeyGen LiveAvatar
+```
+
+Tavus echo avoids this entirely. The "heavy lifting" (TTS) happens inside Tavus's infrastructure:
+
+```
+Client sends text → Tavus generates speech + lip-sync internally
+```
+
+### 3. SDK stability
+
+The HeyGen LITE SDK has a bug in `repeatAudio()` (incorrect base64 chunking), forcing the code to access the private `_sessionEventSocket` WebSocket directly (`use-avatar.ts:177`). Any SDK update could break this. Tavus uses Daily.co's public `sendAppMessage()` API — no private internals.
+
+### 4. Recommendation
+
+Deprecate Live (HeyGen) mode. Tavus echo is strictly better for this use case:
+- Lower bandwidth per response (~200B vs ~600KB round-trip)
+- No architectural bottleneck (text in vs audio shuttle through the browser)
+- Stable public API (Daily.co vs private WebSocket hack)
+- Same visual continuity (continuous WebRTC stream)
+
+The `useAvatar` hook, the `/api/v1/demo/avatar` endpoint, and the HeyGen SDK dependency (`@heygen/liveavatar-web-sdk`) can be removed once Tavus is confirmed stable in production.
 
 ---
 
@@ -157,11 +196,12 @@ Tavus and Live both solve the visual continuity problem. Tavus has the edge on S
 
 In priority order:
 
-1. **Add the missing DELETE handler** for Tavus conversation cleanup — prevents wasting money on orphaned sessions
-2. **Merge transcribe + match** into a single server-side endpoint — eliminates one network round-trip, ~1-2s latency reduction
-3. **Pin the speech-end event** — log which Tavus event fires in production, lock to that, remove the shotgun pattern matching
+1. ~~**Add the missing DELETE handler**~~ ✅ Done — `DELETE /api/v1/demo/tavus/[conversationId]`
+2. ~~**Merge transcribe + match**~~ ✅ Done — `POST /api/v1/demo/process`
+3. ~~**Pin the speech-end event**~~ ✅ Done — locked to `conversation.echo_end` and `conversation.utterance_end`
 4. **Reduce stream-ready timeout** to 30s with progressive feedback
-5. **Clean up dead code paths** if other avatar modes are no longer needed (the ElevenLabs agent pipeline, HeyGen hooks, etc.)
+5. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
+6. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
 
 ---
 

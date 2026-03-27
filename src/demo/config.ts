@@ -30,15 +30,28 @@ export const USE_HAIKU_MODE = AVATAR_MODE === "haiku";
 export const USE_AUDIO_ONLY = AVATAR_MODE === "audio" || !AVATAR_MODE;
 
 /**
- * Modes that use the local voice pipeline (VAD → ElevenLabs STT → Bedrock matcher)
+ * Modes that use the local voice pipeline (VAD → STT → matcher)
  * instead of the ElevenLabs Conversational AI agent.
  * Only "video" and "audio" modes still use the agent.
  */
 export const USE_LOCAL_PIPELINE = USE_HAIKU_MODE || USE_LIVE_AVATAR || USE_TAVUS_AVATAR;
 
+/**
+ * Processing pipeline — controls how audio is transcribed and classified.
+ *
+ * "flash"   — Gemini 2.5 Flash: single API call for STT + classification
+ * "default" — ElevenLabs STT + Bedrock Haiku classifier (two-step)
+ *
+ * Only applies to local pipeline modes (haiku, live, tavus).
+ * Set via NEXT_PUBLIC_PROCESSING_MODE env var.
+ */
+const PROCESSING_MODE = process.env.NEXT_PUBLIC_PROCESSING_MODE ?? "default";
+export const USE_GEMINI_FLASH = PROCESSING_MODE === "flash";
+
 // Debug: log resolved avatar mode on load
 if (typeof window !== "undefined") {
   console.log("[demo:config] AVATAR_MODE =", JSON.stringify(AVATAR_MODE),
+    "| PROCESSING_MODE =", JSON.stringify(PROCESSING_MODE),
     "| USE_LIVE_AVATAR =", USE_LIVE_AVATAR,
     "| USE_LOCAL_PIPELINE =", USE_LOCAL_PIPELINE);
 }

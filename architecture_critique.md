@@ -6,16 +6,27 @@ This document reviews the Tavus CVI (Conversational Video Interface) processing 
 
 ## Current Flow Summary
 
+The processing pipeline is selected by `NEXT_PUBLIC_PROCESSING_MODE`:
+
+**Flash pipeline** (`NEXT_PUBLIC_PROCESSING_MODE=flash`) — single external API call:
 ```
 User speaks
-  → VAD (amplitude-based, client-side)
-  → POST /api/v1/demo/process (PCM → WAV → ElevenLabs STT → Bedrock Haiku classifier → DB response)
-  → tavusAvatar.echo(answerText) via Daily.co app-message
+  → VAD (client-side)
+  → POST /api/v1/demo/process (PCM → WAV → Gemini 2.5 Flash: STT + classification in one call)
+  → tavusAvatar.echo(answerText)
   → Tavus replica speaks with lip-sync
-  → Voice listener resumes
 ```
 
-The Tavus mode uses the "local pipeline" — voice capture happens client-side, then a single server round-trip handles transcription and question classification. Tavus is used purely as a talking-head renderer via its echo protocol.
+**Default pipeline** (`NEXT_PUBLIC_PROCESSING_MODE=default`) — two external API calls:
+```
+User speaks
+  → VAD (client-side)
+  → POST /api/v1/demo/process (PCM → WAV → ElevenLabs STT → Bedrock Haiku classifier)
+  → tavusAvatar.echo(answerText)
+  → Tavus replica speaks with lip-sync
+```
+
+Both pipelines use the same client code and return the same response shape. The branching is entirely server-side. The Tavus mode uses the "local pipeline" — voice capture happens client-side, then a single server round-trip handles transcription and question classification. Tavus is used purely as a talking-head renderer via its echo protocol.
 
 ---
 
@@ -126,12 +137,13 @@ This waits for React to flush state so the `<video>` element is wired up before 
 | Concern | Video/Haiku | Live (HeyGen) | **Tavus** | Audio |
 |---|---|---|---|---|
 | Voice capture | VAD + STT | VAD + STT | **VAD + STT** | ElevenLabs agent |
-| Classification | Bedrock Haiku | Bedrock Haiku | **Bedrock Haiku** | ElevenLabs agent |
+| Classification | Bedrock Haiku | Bedrock Haiku | **Bedrock Haiku or Gemini Flash** | ElevenLabs agent |
 | Response delivery | Pre-recorded MP4/MP3 | Pre-recorded PCM → lip-sync | **Text → echo lip-sync** | Pre-recorded MP3 |
 | Visual continuity | Poor (clip jumps) | Good (continuous stream) | **Good (continuous stream)** | N/A |
 | SDK stability | Native `<video>` | Fragile (private WS hack) | **Stable (Daily.co public API)** | N/A |
 | Data over wire per response | MP4 download | ~300KB PCM download + upload | **~200 bytes of text** | MP3 download |
-| External services | ElevenLabs STT, Bedrock | ElevenLabs STT, Bedrock, HeyGen | **ElevenLabs STT, Bedrock, Tavus** | ElevenLabs |
+| External API calls per utterance | 2 | 2 | **1 (flash) or 2 (default)** | 0 |
+| External services | ElevenLabs STT, Bedrock | ElevenLabs STT, Bedrock, HeyGen | **Gemini + Tavus (flash) or ElevenLabs STT + Bedrock + Tavus (default)** | ElevenLabs |
 
 ---
 
@@ -182,9 +194,26 @@ In priority order:
 1. ~~**Add the missing DELETE handler**~~ ✅ Done — `DELETE /api/v1/demo/tavus/[conversationId]`
 2. ~~**Merge transcribe + match**~~ ✅ Done — `POST /api/v1/demo/process`
 3. ~~**Pin the speech-end event**~~ ✅ Done — locked to `conversation.echo_end` and `conversation.utterance_end`
-4. **Reduce stream-ready timeout** to 30s with progressive feedback
-5. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
-6. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
+4. ~~**Add Gemini Flash pipeline**~~ ✅ Done — `NEXT_PUBLIC_PROCESSING_MODE=flash` uses Gemini 2.5 Flash for STT + classification in one call
+5. **Reduce stream-ready timeout** to 30s with progressive feedback
+6. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
+7. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
+
+---
+
+## Processing Pipeline Comparison
+
+| | Default (ElevenLabs + Bedrock) | Flash (Gemini) |
+|---|---|---|
+| External API calls | 2 (STT then classifier) | 1 (single multimodal call) |
+| Services | ElevenLabs, AWS Bedrock | Google Gemini |
+| Latency | STT + classifier sequentially | Single inference |
+| Env vars needed | `ELEVENLABS_API_KEY`, `AWS_*`, `BEDROCK_MODEL_ID` | `GEMINI_API_KEY` |
+| Configuration | `NEXT_PUBLIC_PROCESSING_MODE=default` (or unset) | `NEXT_PUBLIC_PROCESSING_MODE=flash` |
+| STT quality | ElevenLabs Scribe (very good) | Gemini native (good) |
+| Classification | Claude Haiku (temperature 0) | Gemini Flash (temperature 0, JSON mode) |
+
+The Flash pipeline reduces external dependencies from 2 services to 1 and eliminates the sequential latency of two separate API calls. The client code is unchanged — both pipelines return the same response shape from `POST /api/v1/demo/process`.
 
 ---
 
@@ -192,4 +221,4 @@ In priority order:
 
 The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound.
 
-Three issues have been fixed: conversation cleanup (DELETE endpoint + unmount cleanup), latency (single round-trip `POST /process` replacing two sequential calls), and reliability (speech-end detection pinned to documented events). The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.
+Four improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, and the Gemini Flash pipeline (single API call for STT + classification). The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.

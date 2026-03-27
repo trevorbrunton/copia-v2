@@ -18,9 +18,12 @@ import { useCallback, useRef, useState } from "react";
  *   6. stop() — closes mic and cleans up
  */
 
-/** VAD tuning defaults */
+/** VAD tuning defaults — silence timeout configurable via env var */
 const DEFAULT_SPEECH_THRESHOLD = 0.02; // amplitude above this = speech
-const DEFAULT_SILENCE_TIMEOUT_MS = 1500; // silence duration to end an utterance
+const DEFAULT_SILENCE_TIMEOUT_MS = parseInt(
+  process.env.NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS ?? "1000",
+  10
+);
 const DEFAULT_MIN_SPEECH_DURATION_MS = 400; // ignore utterances shorter than this
 
 interface UseVoiceListenerOptions {

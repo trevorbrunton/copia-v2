@@ -288,6 +288,26 @@ A typical investor demo conversation runs ~5 minutes. At current Tavus Starter p
 
 At Growth tier ($397/mo, 1,250 included min), you'd need 250+ demos/month before overages kick in.
 
+### Concurrent Stream Limits (Production Capacity)
+
+Most platforms treat concurrency as a sales negotiation, not a published spec. This is critical for production — if multiple users access the demo simultaneously, you hit a hard wall.
+
+| Platform | Starter/Mid Tier | Enterprise |
+|---|---|---|
+| **Tavus CVI** | Not published (likely 1-5) | Negotiated |
+| **HeyGen Interactive** | 1-3 | 10-50+ |
+| **HeyGen LiveAvatar LITE** | Not published | Not published |
+| **D-ID** | 5 (Pro) | 50-100 |
+| **Simli** | 1-5 (estimated) | Negotiated |
+
+**D-ID is the most transparent** — they document a `max_concurrent_streams` property on accounts and return a clean 429 when exceeded. Tavus and HeyGen treat concurrency as opaque account-level limits.
+
+**Production readiness checklist:**
+1. **Determine your Tavus concurrent session cap** — try creating 3-4 simultaneous conversations to find the wall, or ask Tavus sales directly
+2. **Decide what happens when the limit is hit** — does the API return a 429? Queue? Silently fail? Test this before users encounter it.
+3. **Consider server-side session tracking** — maintain a count of active Tavus sessions so you can show "Demo busy, please wait" instead of letting users hit opaque platform errors
+4. **If concurrency matters at scale**, D-ID's documented limits and predictable 429 behaviour make it the most production-friendly option
+
 ### If Scaling Becomes a Concern
 
 The architecture is designed so the avatar platform is swappable. The `useTavusAvatar` hook is the only integration point — replacing it with a D-ID or Simli equivalent would require:
@@ -298,7 +318,7 @@ The architecture is designed so the avatar platform is swappable. The `useTavusA
 
 The processing pipeline (`POST /api/v1/demo/process`), voice listener, demo orchestration, and UI components would remain unchanged.
 
-**D-ID** (~$0.05-0.10/min) would be the most direct replacement — same architecture (text in, WebRTC video out), ~3-7x cheaper per minute than Tavus. **Simli** (~$0.02-0.04/min) is cheapest but requires bringing your own TTS, adding a service dependency.
+**D-ID** (~$0.05-0.10/min, 5-100 concurrent streams) would be the most direct replacement — same architecture (text in, WebRTC video out), ~3-7x cheaper per minute than Tavus, and the best-documented concurrency model. **Simli** (~$0.02-0.04/min) is cheapest but requires bringing your own TTS, adding a service dependency.
 
 ### Why Tavus Echo Over Tavus Full CVI
 
@@ -317,6 +337,6 @@ The Tavus echo architecture is a deliberate and justified choice: it's the simpl
 
 Five improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, the Gemini Flash pipeline (single API call for STT + classification), and reduced VAD silence timeout (1500ms → 1000ms, configurable). Together these reduce perceived latency by ~700-900ms per utterance.
 
-Tavus pricing is reasonable for demo-scale usage (~$59/mo for up to 20 five-minute demos). If usage scales significantly, D-ID and Simli are viable cheaper alternatives with the same text-in/WebRTC-out architecture — the hook-based design makes the avatar layer swappable without touching the rest of the stack.
+Tavus pricing is reasonable for demo-scale usage (~$59/mo for up to 20 five-minute demos). Concurrent stream limits are not published and should be tested before production deployment — this is the main scaling risk. If concurrency or cost becomes a constraint, D-ID offers the best combination of transparent pricing (~$0.05-0.10/min), documented concurrency limits (5-100 streams), and the same text-in/WebRTC-out architecture. The hook-based design makes the avatar layer swappable without touching the rest of the stack.
 
 The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.

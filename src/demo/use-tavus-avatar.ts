@@ -158,21 +158,21 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         });
 
         // Listen for Tavus CVI app-messages to detect speech completion.
+        // Tavus echo completion fires "conversation.echo_end" per the CVI docs.
+        // We also accept "conversation.utterance_end" as a fallback in case the
+        // event name varies across Tavus API versions.
         call.on("app-message", (evt) => {
           const data = evt?.data;
           if (!data) return;
-          console.log("[tavus] app-message:", data);
 
-          // Tavus CVI signals speech end with various event types.
-          // Check for utterance_end / echo_end / response_end patterns.
           const eventType: string = data.event_type ?? data.type ?? "";
+
+          // Log non-speech events at debug level to avoid noise
           if (
-            eventType.includes("utterance_end") ||
-            eventType.includes("echo_end") ||
-            eventType.includes("response_end") ||
-            eventType.includes("stopped_speaking")
+            eventType === "conversation.echo_end" ||
+            eventType === "conversation.utterance_end"
           ) {
-            console.log("[tavus] Speech end detected via:", eventType);
+            console.log("[tavus] Speech end detected:", eventType);
             setStatus((prev) => (prev === "speaking" ? "ready" : prev));
             if (echoResolveRef.current) {
               echoResolveRef.current();
@@ -321,6 +321,12 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         call.leave().catch(() => {});
         call.destroy().catch(() => {});
         callRef.current = null;
+      }
+      // End conversation server-side on unmount too
+      const convId = conversationIdRef.current;
+      if (convId) {
+        fetch(`/api/demo/tavus/${convId}`, { method: "DELETE" }).catch(() => {});
+        conversationIdRef.current = null;
       }
     };
   }, []);

@@ -98,7 +98,7 @@ export function useDemo() {
       setIsProcessing(true);
 
       try {
-        // Step 1: Transcribe via ElevenLabs STT
+        // Transcribe + match in a single server round-trip
         const formData = new FormData();
         formData.append(
           "audio",
@@ -106,19 +106,26 @@ export function useDemo() {
         );
         formData.append("sampleRate", String(sampleRate));
 
-        const transcribeRes = await fetch("/api/v1/demo/transcribe", {
+        const processRes = await fetch("/api/v1/demo/process", {
           method: "POST",
           body: formData,
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(45_000),
         });
 
-        if (!transcribeRes.ok) {
-          throw new Error(`Transcribe error: ${transcribeRes.status}`);
+        if (!processRes.ok) {
+          throw new Error(`Process error: ${processRes.status}`);
         }
 
-        const { text: userText } = await transcribeRes.json();
+        const result: {
+          text: string;
+          category?: string;
+          answerText?: string;
+          audioUrl?: string;
+          pcmUrl?: string;
+          videoUrl?: string;
+        } = await processRes.json();
 
-        if (!userText) {
+        if (!result.text) {
           // No speech detected — resume listening
           setIsProcessing(false);
           setBusy(false);
@@ -127,33 +134,13 @@ export function useDemo() {
         }
 
         // Show user's transcribed speech in chat
-        setMessages((prev) => [...prev, createMessage("user", userText)]);
-
-        // Step 2: Match question via Bedrock Haiku
-        const matchRes = await fetch("/api/v1/demo/match", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: userText }),
-          signal: AbortSignal.timeout(15_000),
-        });
-
-        if (!matchRes.ok) {
-          throw new Error(`Match error: ${matchRes.status}`);
-        }
-
-        const result: {
-          category: string;
-          answerText: string;
-          audioUrl: string;
-          pcmUrl: string;
-          videoUrl: string;
-        } = await matchRes.json();
+        setMessages((prev) => [...prev, createMessage("user", result.text)]);
 
         const cached = {
-          audioUrl: result.audioUrl,
-          pcmUrl: result.pcmUrl,
-          videoUrl: result.videoUrl,
-          text: result.answerText,
+          audioUrl: result.audioUrl ?? "",
+          pcmUrl: result.pcmUrl ?? "",
+          videoUrl: result.videoUrl ?? "",
+          text: result.answerText ?? "",
         };
 
         // Show response text in chat

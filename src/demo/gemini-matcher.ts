@@ -12,7 +12,7 @@ import { logger } from "@/src/lib/logger";
 import type { MatchResult } from "./bedrock-matcher";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-preview-05-20";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
 // ─── Cached DB data (static seed data, loaded once) ─────────────────
 
@@ -121,6 +121,20 @@ export async function processAudioWithGemini(
       temperature: 0,
       maxOutputTokens: 200,
       responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {
+          transcript: {
+            type: "string",
+            description: "What the user said, transcribed verbatim",
+          },
+          category: {
+            type: "string",
+            description: "The matched category name, or 'fallback' if no match",
+          },
+        },
+        required: ["transcript", "category"],
+      },
     },
   };
 

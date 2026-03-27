@@ -20,6 +20,16 @@ The Tavus mode uses the "local pipeline" — voice capture, transcription, and q
 
 ---
 
+## Why Tavus Echo (Not Full CVI or Pre-Recorded Video)
+
+The demo requires **pre-approved, exact responses** for each question category — the avatar must say precisely what was written, not an LLM improvisation. This rules out Tavus's built-in conversational AI.
+
+Pre-recorded MP4 clips were tried (the haiku/video modes) but produce visible jumps between clips — the avatar's head position, expression, and lighting don't match across segments, breaking the illusion of a continuous conversation.
+
+Tavus echo solves both problems: it delivers a **single continuous WebRTC video stream** with **real-time lip-sync driven by exact pre-approved text**. The architecture deliberately uses only the echo subset of Tavus CVI because that's the capability that matters — seamless visual continuity over controlled content.
+
+---
+
 ## What Works Well
 
 ### 1. Clean separation of concerns
@@ -34,57 +44,35 @@ The `TAVUS_API_KEY` never reaches the client. The server creates the conversatio
 ### 4. Dynamic SDK import
 `@daily-co/daily-js` is dynamically imported to avoid SSR issues. Appropriate for a Next.js app.
 
+### 5. Continuous stream eliminates visual cuts
+Unlike the video/haiku modes (which swap MP4 `src` and produce jarring transitions), the Tavus WebRTC stream is a single persistent connection. The avatar is always "live" — echo just changes what it says. No flicker, no head-position jumps, no lighting mismatches.
+
 ---
 
-## Issues Found
+## Issues to Fix
 
-### Critical
-
-#### 1. Tavus is underutilised — the local pipeline negates its value
-**Files:** `src/demo/config.ts`, `src/demo/use-demo.ts`
-
-Tavus CVI is a **full conversational AI platform** with built-in STT, LLM, and TTS. The current architecture ignores all of that and uses Tavus purely as a lip-sync renderer via `conversation.echo`. The actual flow is:
-
-```
-Mic → VAD → ElevenLabs STT → Bedrock Haiku → pre-written text → Tavus echo
-```
-
-This means the app is paying for and maintaining:
-- A custom VAD implementation (`use-voice-listener.ts`)
-- ElevenLabs STT API calls (`/api/v1/demo/transcribe`)
-- Bedrock Haiku classifier calls (`/api/v1/demo/match`)
-- Tavus CVI subscription (but only using ~10% of its capability)
-
-**If the pre-generated response model is essential** (which it appears to be — the demo needs exact, pre-approved answers with specific media URLs), then Tavus CVI is the wrong tool. A simpler TTS-with-lip-sync service would suffice.
-
-**If Tavus's conversational AI is desired**, the local pipeline should be removed entirely and Tavus should handle STT → LLM → TTS → lip-sync natively, with the persona configured in Tavus's dashboard.
-
-**Recommendation:** Decide which model you actually need. Either:
-- (a) Lean into Tavus CVI fully — configure the persona/knowledge base in Tavus and let it handle the full conversation. Remove the local pipeline for tavus mode.
-- (b) Drop Tavus CVI and use a simpler avatar/lip-sync service (or just video mode), since you're only using echo.
-
-#### 2. Missing DELETE endpoint — conversations are never cleaned up server-side
+### 1. Missing DELETE endpoint — conversations are never cleaned up server-side
+**Severity:** Critical
 **Files:** `src/demo/use-tavus-avatar.ts:311`, `app/api/v1/demo/tavus/route.ts`
 
-`stopAvatar()` attempts `DELETE /api/demo/tavus/{conversationId}` but **no DELETE handler exists**. This means every Tavus conversation runs until Tavus's own timeout kills it. At ~$0.05–0.10/minute, orphaned conversations burn money.
+`stopAvatar()` attempts `DELETE /api/demo/tavus/{conversationId}` but **no DELETE handler exists**. This means every Tavus conversation runs until Tavus's own idle timeout kills it. Orphaned conversations burn money.
 
-**Recommendation:** Add a DELETE handler that calls `DELETE https://tavusapi.com/v2/conversations/{id}` with the API key, or use Tavus webhooks for automatic cleanup.
+**Fix:** Add a DELETE route at `app/api/v1/demo/tavus/[conversationId]/route.ts` that calls `DELETE https://tavusapi.com/v2/conversations/{id}` with the API key. Also fix the client-side URL (currently missing `/v1/` prefix).
 
-### Significant
+### 2. Two round-trips per user utterance
+**Severity:** Significant — adds 1-3 seconds of latency per question
+**File:** `src/demo/use-demo.ts:109-150`
 
-#### 3. Redundant hooks always instantiated
-**File:** `src/demo/use-demo.ts:72-73`
+Every user question makes two sequential API calls:
+1. `POST /api/v1/demo/transcribe` — STT
+2. `POST /api/v1/demo/match` — classification
 
-```typescript
-const avatar = useAvatar();       // HeyGen LiveAvatar
-const tavusAvatar = useTavusAvatar(); // Tavus CVI
-```
+These are sequential because match depends on the transcribed text. The total latency is STT time + classifier time + two network round-trips.
 
-Both hooks are always instantiated regardless of avatar mode. While necessary for React's hook ordering rules, `useAvatar()` sets up state and refs that are never used in Tavus mode (and vice versa). The `useConversation()` hook from ElevenLabs (line 187) is also always instantiated even in local pipeline modes.
+**Fix:** Combine into a single `POST /api/v1/demo/process` endpoint that does transcribe → match server-side in one round-trip. This eliminates one full network round-trip and allows server-side optimisations (e.g., starting the classifier while STT is still streaming) in the future.
 
-**Recommendation:** Consider a single `useAvatarRenderer` hook that internally branches by mode, or restructure the component tree so different mode components render different hooks.
-
-#### 4. Speech-end detection is fragile
+### 3. Speech-end detection is fragile
+**Severity:** Significant
 **File:** `src/demo/use-tavus-avatar.ts:168-181`
 
 The code checks for speech completion by pattern-matching event type strings:
@@ -96,95 +84,87 @@ eventType.includes("response_end") ||
 eventType.includes("stopped_speaking")
 ```
 
-This is a shotgun approach — it tries every possible event name because the exact Tavus CVI protocol isn't pinned. If Tavus changes their event naming, or if events fire in unexpected order, the promise resolves too early or too late. The fallback timeout (`text.length * 80 + 3000` ms) masks the problem.
+This is a shotgun approach — it tries every possible event name because the exact Tavus CVI protocol isn't pinned down. If Tavus changes their event naming, or if events fire in unexpected order, the promise resolves too early or too late. The fallback timeout (`text.length * 80 + 3000` ms) masks the problem.
 
-**Recommendation:** Pin to the specific Tavus CVI event documented for echo completion. Remove the catch-all patterns. If the docs are ambiguous, add logging to identify the authoritative event and lock to that.
+**Fix:** Add temporary logging to identify which event Tavus actually sends for echo completion in production, then pin to that specific event type. Remove the catch-all patterns.
 
-#### 5. 60-second stream-ready timeout is too long
+---
+
+## Improvements Worth Considering
+
+### 4. 60-second stream-ready timeout is too long
 **File:** `src/demo/use-tavus-avatar.ts:77-93`
 
-The user stares at a spinner for up to 60 seconds waiting for the replica's video track. In practice, Tavus replicas typically connect in 5-15 seconds. A 60-second timeout means a broken connection wastes a full minute before failing.
+The user stares at a spinner for up to 60 seconds waiting for the replica's video track. Tavus replicas typically connect in 5-15 seconds. A 60-second timeout wastes a full minute on a broken connection before failing.
 
-**Recommendation:** Reduce to 30 seconds. Add intermediate feedback (e.g., "Still connecting..." at 10s, "This is taking longer than usual..." at 20s).
+**Suggestion:** Reduce to 30 seconds. Add intermediate feedback (e.g., "Still connecting..." at 10s, "This is taking longer than usual..." at 20s).
 
-#### 6. Two round-trips per user utterance
-**File:** `src/demo/use-demo.ts:109-150`
+### 5. Redundant hooks always instantiated
+**File:** `src/demo/use-demo.ts:72-73`
 
-Every user question makes two sequential API calls:
-1. `POST /api/v1/demo/transcribe` — STT
-2. `POST /api/v1/demo/match` — classification
+```typescript
+const avatar = useAvatar();       // HeyGen LiveAvatar — unused in tavus mode
+const tavusAvatar = useTavusAvatar(); // Tavus CVI — unused in live mode
+```
 
-These are sequential because match depends on the transcribed text. But the total latency is STT time + classifier time + network overhead × 2, adding 1-3 seconds before the avatar even starts speaking.
+Both hooks plus the ElevenLabs `useConversation()` hook (line 187) are always instantiated regardless of mode, due to React's hook ordering rules. They set up state and refs that go unused.
 
-**Recommendation:** Combine into a single `POST /api/v1/demo/process` endpoint that does transcribe → match server-side in one round-trip. This saves one full network round-trip and allows server-side streaming of partial results if needed later.
+**Suggestion:** Restructure the component tree so different mode components mount different hooks, or create a single `useAvatarRenderer` facade that branches internally.
 
-### Minor
-
-#### 7. `console.log` used extensively in production code
+### 6. `console.log` used extensively in production code
 **Files:** `use-tavus-avatar.ts`, `use-demo.ts`
 
 The codebase has a proper structured logger (`src/lib/logger.ts`) but the demo hooks use raw `console.log` / `console.warn` throughout. These will appear in production browser consoles.
 
-**Recommendation:** Either remove debug logging or gate it behind a `DEBUG` flag.
+**Suggestion:** Gate behind a `DEBUG` flag or remove once the Tavus integration is stable.
 
-#### 8. `ScriptProcessorNode` is deprecated
+### 7. `ScriptProcessorNode` is deprecated
 **File:** `src/demo/use-voice-listener.ts`
 
-The voice listener uses `ScriptProcessorNode` for real-time audio processing, which is deprecated in the Web Audio API. It works today but will eventually be removed from browsers.
+The voice listener uses `ScriptProcessorNode` for real-time audio processing, which is deprecated in the Web Audio API. It works today but will eventually be removed.
 
-**Recommendation:** Migrate to `AudioWorkletNode` when time permits. Not urgent — ScriptProcessorNode still works in all major browsers.
+**Suggestion:** Migrate to `AudioWorkletNode` when time permits. Not urgent.
 
-#### 9. The 200ms `setTimeout` yield is a code smell
+### 8. The 200ms `setTimeout` yield is a code smell
 **File:** `src/demo/use-demo.ts:431-432`
 
 ```typescript
 await new Promise((r) => setTimeout(r, 200));
 ```
 
-This waits for React to flush state so the `<video>` element is wired up before the greeting plays. It's fragile — if React batching changes or the component tree grows, 200ms may not be enough (or may be wastefully long).
+This waits for React to flush state so the `<video>` element is wired up before the greeting plays. Fragile — dependent on React batching timing.
 
-**Recommendation:** Use a ref callback or `useEffect` that resolves a promise when the video element is ready, rather than a blind timeout.
+**Suggestion:** Use a ref callback or `useEffect` that resolves a promise when the video element is ready.
 
 ---
 
 ## Architecture Comparison: Modes at a Glance
 
-| Concern | Video | Haiku | Live | **Tavus** | Audio |
-|---|---|---|---|---|---|
-| Voice capture | ElevenLabs agent | VAD + STT | VAD + STT | **VAD + STT** | ElevenLabs agent |
-| Classification | ElevenLabs agent | Bedrock Haiku | Bedrock Haiku | **Bedrock Haiku** | ElevenLabs agent |
-| TTS | Pre-recorded | Pre-recorded | Pre-recorded PCM | **Tavus echo** | Pre-recorded |
-| Visual | MP4 swap | MP4 swap | HeyGen lip-sync | **Tavus lip-sync** | None |
-| Services used | ElevenLabs | ElevenLabs STT, AWS Bedrock | ElevenLabs STT, AWS Bedrock, HeyGen | **ElevenLabs STT, AWS Bedrock, Tavus** | ElevenLabs |
+| Concern | Video/Haiku | Live (HeyGen) | **Tavus** | Audio |
+|---|---|---|---|---|
+| Voice capture | VAD + STT | VAD + STT | **VAD + STT** | ElevenLabs agent |
+| Classification | Bedrock Haiku | Bedrock Haiku | **Bedrock Haiku** | ElevenLabs agent |
+| Response delivery | Pre-recorded MP4/MP3 | Pre-recorded PCM → lip-sync | **Text → echo lip-sync** | Pre-recorded MP3 |
+| Visual continuity | Poor (clip jumps) | Good (continuous stream) | **Good (continuous stream)** | N/A |
+| SDK stability | Native `<video>` | Fragile (private WS hack) | **Stable (Daily.co public API)** | N/A |
+| External services | ElevenLabs STT, Bedrock | ElevenLabs STT, Bedrock, HeyGen | **ElevenLabs STT, Bedrock, Tavus** | ElevenLabs |
 
-Tavus mode is the most expensive in terms of external service dependencies (3 paid APIs) while delivering similar functionality to Live mode. The key question is whether Tavus's video quality justifies the cost and complexity over HeyGen, or whether Tavus should be used end-to-end.
+Tavus and Live both solve the visual continuity problem. Tavus has the edge on SDK stability (Daily.co's public API vs HeyGen's private WebSocket internals) and bandwidth efficiency (sends text instead of PCM audio). Live avoids paying for unused Tavus CVI features, but its SDK workarounds are a maintenance risk.
 
 ---
 
-## Recommended Simplification (If Keeping Pre-Generated Responses)
+## Recommended Action Plan
 
-If the demo must use pre-approved, pre-generated responses (the current model), the simplest efficient architecture would be:
+In priority order:
 
-1. **Drop Tavus CVI** — replace with a lightweight lip-sync service or stay with video mode
-2. **Merge transcribe + match** into a single API endpoint
-3. **Remove the ElevenLabs agent code path** if unused (it's dead code when `USE_LOCAL_PIPELINE` is true)
-4. **Add the missing conversation cleanup** endpoint
-
-This would reduce external dependencies from 3 to 2 (STT + classifier) and eliminate the complexity of managing a WebRTC session for what amounts to a text-to-speech call.
-
-## Recommended Simplification (If Tavus's Full AI Is Desired)
-
-If the goal is a truly conversational avatar:
-
-1. **Configure Tavus persona** with the fund knowledge base
-2. **Remove the local pipeline** entirely for tavus mode — let Tavus handle STT → LLM → TTS → lip-sync
-3. **Use Tavus callbacks/webhooks** to get the response text for the chat panel
-4. **Keep video/audio modes** as fallback for demos where Tavus is unavailable
-
-This would reduce the client code to: connect to Tavus → render stream → display transcript. Dramatically simpler.
+1. **Add the missing DELETE handler** for Tavus conversation cleanup — prevents wasting money on orphaned sessions
+2. **Merge transcribe + match** into a single server-side endpoint — eliminates one network round-trip, ~1-2s latency reduction
+3. **Pin the speech-end event** — log which Tavus event fires in production, lock to that, remove the shotgun pattern matching
+4. **Reduce stream-ready timeout** to 30s with progressive feedback
+5. **Clean up dead code paths** if other avatar modes are no longer needed (the ElevenLabs agent pipeline, HeyGen hooks, etc.)
 
 ---
 
 ## Summary
 
-The Tavus flow works but sits in an architectural uncanny valley — it uses a full conversational AI platform as a dumb lip-sync renderer. The most impactful change would be deciding which direction to commit to: either use Tavus end-to-end, or replace it with something simpler. The missing DELETE endpoint is the most urgent tactical fix. Merging the two API calls into one would give the quickest latency win.
+The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound. The three concrete issues to fix are the missing conversation cleanup endpoint, the double API round-trip per utterance, and the fragile speech-end detection. Together these fixes would reduce cost, cut ~1-2 seconds of latency per interaction, and improve reliability.

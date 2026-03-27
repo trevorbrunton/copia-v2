@@ -9,14 +9,13 @@ This document reviews the Tavus CVI (Conversational Video Interface) processing 
 ```
 User speaks
   → VAD (amplitude-based, client-side)
-  → POST /api/v1/demo/transcribe (PCM → WAV → ElevenLabs STT)
-  → POST /api/v1/demo/match (text → Bedrock Haiku classifier → DB response)
+  → POST /api/v1/demo/process (PCM → WAV → ElevenLabs STT → Bedrock Haiku classifier → DB response)
   → tavusAvatar.echo(answerText) via Daily.co app-message
   → Tavus replica speaks with lip-sync
   → Voice listener resumes
 ```
 
-The Tavus mode uses the "local pipeline" — voice capture, transcription, and question classification all happen outside Tavus. Tavus is used purely as a talking-head renderer via its echo protocol.
+The Tavus mode uses the "local pipeline" — voice capture happens client-side, then a single server round-trip handles transcription and question classification. Tavus is used purely as a talking-head renderer via its echo protocol.
 
 ---
 
@@ -49,44 +48,28 @@ Unlike the video/haiku modes (which swap MP4 `src` and produce jarring transitio
 
 ---
 
-## Issues to Fix
+## Issues Fixed
 
-### 1. Missing DELETE endpoint — conversations are never cleaned up server-side
-**Severity:** Critical
-**Files:** `src/demo/use-tavus-avatar.ts:311`, `app/api/v1/demo/tavus/route.ts`
+### 1. ✅ Missing DELETE endpoint — conversations are now cleaned up server-side
+**Files:** `app/api/v1/demo/tavus/[conversationId]/route.ts`, `src/demo/use-tavus-avatar.ts`
 
-`stopAvatar()` attempts `DELETE /api/demo/tavus/{conversationId}` but **no DELETE handler exists**. This means every Tavus conversation runs until Tavus's own idle timeout kills it. Orphaned conversations burn money.
+Previously, `stopAvatar()` called `DELETE /api/demo/tavus/{conversationId}` but no handler existed, so orphaned conversations ran until Tavus's idle timeout.
 
-**Fix:** Add a DELETE route at `app/api/v1/demo/tavus/[conversationId]/route.ts` that calls `DELETE https://tavusapi.com/v2/conversations/{id}` with the API key. Also fix the client-side URL (currently missing `/v1/` prefix).
+**What changed:** Added `DELETE /api/v1/demo/tavus/[conversationId]` route that calls `DELETE https://tavusapi.com/v2/conversations/{id}` with the API key. Also added cleanup on component unmount so conversations end even if the user closes the tab without disconnecting.
 
-### 2. Two round-trips per user utterance
-**Severity:** Significant — adds 1-3 seconds of latency per question
-**File:** `src/demo/use-demo.ts:109-150`
+### 2. ✅ Single round-trip per user utterance
+**Files:** `app/api/v1/demo/process/route.ts`, `src/demo/use-demo.ts`
 
-Every user question makes two sequential API calls:
-1. `POST /api/v1/demo/transcribe` — STT
-2. `POST /api/v1/demo/match` — classification
+Previously, every user question made two sequential API calls (`POST /transcribe` then `POST /match`), adding an extra network round-trip of ~1-2 seconds.
 
-These are sequential because match depends on the transcribed text. The total latency is STT time + classifier time + two network round-trips.
+**What changed:** Added unified `POST /api/v1/demo/process` endpoint that does transcribe → match server-side in one call. Updated `use-demo.ts` to call the new endpoint. The old `/transcribe` and `/match` endpoints remain available for other modes.
 
-**Fix:** Combine into a single `POST /api/v1/demo/process` endpoint that does transcribe → match server-side in one round-trip. This eliminates one full network round-trip and allows server-side optimisations (e.g., starting the classifier while STT is still streaming) in the future.
+### 3. ✅ Speech-end detection pinned to documented events
+**File:** `src/demo/use-tavus-avatar.ts`
 
-### 3. Speech-end detection is fragile
-**Severity:** Significant
-**File:** `src/demo/use-tavus-avatar.ts:168-181`
+Previously, speech completion was detected by shotgun pattern-matching four different event type strings (`utterance_end`, `echo_end`, `response_end`, `stopped_speaking`).
 
-The code checks for speech completion by pattern-matching event type strings:
-
-```typescript
-eventType.includes("utterance_end") ||
-eventType.includes("echo_end") ||
-eventType.includes("response_end") ||
-eventType.includes("stopped_speaking")
-```
-
-This is a shotgun approach — it tries every possible event name because the exact Tavus CVI protocol isn't pinned down. If Tavus changes their event naming, or if events fire in unexpected order, the promise resolves too early or too late. The fallback timeout (`text.length * 80 + 3000` ms) masks the problem.
-
-**Fix:** Add temporary logging to identify which event Tavus actually sends for echo completion in production, then pin to that specific event type. Remove the catch-all patterns.
+**What changed:** Pinned to the two documented Tavus CVI events: `conversation.echo_end` and `conversation.utterance_end`. The fallback timeout remains as a safety net.
 
 ---
 
@@ -207,4 +190,6 @@ In priority order:
 
 ## Summary
 
-The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound. The three concrete issues to fix are the missing conversation cleanup endpoint, the double API round-trip per utterance, and the fragile speech-end detection. Together these fixes would reduce cost, cut ~1-2 seconds of latency per interaction, and improve reliability.
+The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound.
+
+Three issues have been fixed: conversation cleanup (DELETE endpoint + unmount cleanup), latency (single round-trip `POST /process` replacing two sequential calls), and reliability (speech-end detection pinned to documented events). The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.

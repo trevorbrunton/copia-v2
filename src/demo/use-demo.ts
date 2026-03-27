@@ -391,6 +391,18 @@ export function useDemo() {
         USE_HAIKU_MODE, USE_LOCAL_PIPELINE,
       });
 
+      // Request mic permission before avatar init so the browser's audio graph
+      // is settled before any WebRTC audio flows — avoids a brief audio glitch.
+      if (USE_LOCAL_PIPELINE) {
+        try {
+          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          micStream.getTracks().forEach((t) => t.stop());
+          console.log("[demo:connect] Mic permission granted (pre-warm)");
+        } catch (err) {
+          console.warn("[demo:connect] Mic permission denied:", err);
+        }
+      }
+
       // Init avatar renderers before greeting so playResponse routes correctly.
       setIsInitialising(true);
       if (USE_TAVUS_AVATAR) {
@@ -496,6 +508,10 @@ export function useDemo() {
     }
 
     // Stop avatars
+    if (USE_TAVUS_AVATAR && avatarReadyRef.current) {
+      tavusAvatar.stopAvatar().catch(() => {});
+      avatarReadyRef.current = false;
+    }
     if (USE_LIVE_AVATAR && avatarReadyRef.current) {
       avatar.stopAvatar().catch(() => {});
       avatarReadyRef.current = false;

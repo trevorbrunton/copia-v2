@@ -158,21 +158,19 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         });
 
         // Listen for Tavus CVI app-messages to detect speech completion.
-        // Tavus echo completion fires "conversation.echo_end" per the CVI docs.
-        // We also accept "conversation.utterance_end" as a fallback in case the
-        // event name varies across Tavus API versions.
         call.on("app-message", (evt) => {
           const data = evt?.data;
           if (!data) return;
+          console.log("[tavus] app-message:", data);
 
           const eventType: string = data.event_type ?? data.type ?? "";
-
-          // Log non-speech events at debug level to avoid noise
           if (
-            eventType === "conversation.echo_end" ||
-            eventType === "conversation.utterance_end"
+            eventType.includes("utterance_end") ||
+            eventType.includes("echo_end") ||
+            eventType.includes("response_end") ||
+            eventType.includes("stopped_speaking")
           ) {
-            console.log("[tavus] Speech end detected:", eventType);
+            console.log("[tavus] Speech end detected via:", eventType);
             setStatus((prev) => (prev === "speaking" ? "ready" : prev));
             if (echoResolveRef.current) {
               echoResolveRef.current();
@@ -222,7 +220,10 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   /**
    * Send text for the replica to speak verbatim with lip-sync (echo mode).
    * Resolves when the replica signals speech completion via app-message,
-   * or after a generous fallback timeout.
+   * or after a fallback timeout estimated from text length.
+   *
+   * Estimated at ~55ms per character — calibrated to slightly undershoot
+   * actual speech duration so the gap is minimal if the fallback fires.
    */
   const echo = useCallback((text: string): Promise<void> => {
     const call = callRef.current;
@@ -232,8 +233,9 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
     }
 
     return new Promise((resolve) => {
-      // Fallback timeout in case no speech-end event arrives (~80ms/char + 3s buffer)
-      const fallbackMs = Math.max(5000, text.length * 80 + 3000);
+      // Fallback: ~55ms/char + 1s buffer. Intentionally tighter than before
+      // to minimise the gap if no speech-end event arrives.
+      const fallbackMs = Math.max(3000, text.length * 55 + 1000);
       const fallback = setTimeout(() => {
         console.warn("[tavus] echo fallback timeout fired after", fallbackMs, "ms");
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));

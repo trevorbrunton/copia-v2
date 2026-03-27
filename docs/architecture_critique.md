@@ -75,25 +75,35 @@ Previously, every user question made two sequential API calls (`POST /transcribe
 
 **What changed:** Added unified `POST /api/v1/demo/process` endpoint that does transcribe → match server-side in one call. Updated `use-demo.ts` to call the new endpoint. The old `/transcribe` and `/match` endpoints remain available for other modes.
 
-### 3. ✅ Speech-end detection pinned to documented events
+### 3. ✅ Speech-end detection — timeout-based with app-message listener
 **File:** `src/demo/use-tavus-avatar.ts`
 
-Previously, speech completion was detected by shotgun pattern-matching four different event type strings (`utterance_end`, `echo_end`, `response_end`, `stopped_speaking`).
+Speech completion uses a calibrated timeout estimate (~55ms/char + 1s buffer, min 3s). An `app-message` listener is also registered in case Tavus starts sending speech-end events (e.g. `utterance_end`, `echo_end`) in the future — if detected, it resolves immediately and cancels the timeout.
 
-**What changed:** Pinned to the two documented Tavus CVI events: `conversation.echo_end` and `conversation.utterance_end`. The fallback timeout remains as a safety net.
+**What was tried and reverted:** AudioContext-based silence detection (monitoring the replica's audio track RMS via an AnalyserNode) was implemented but caused intermittent audio dropouts on the Tavus WebRTC stream. Creating an AudioContext — even with a cloned audio track — disrupted the browser's audio graph and produced ~0.5s cutouts during playback. This approach was fully reverted in favour of the simpler timeout.
+
+### 4. ✅ Mic permission pre-warmed before avatar init
+**File:** `src/demo/use-demo.ts`
+
+Previously, mic permission was requested by `voiceListener.start()` after the greeting finished — causing a delayed browser prompt. Now `getUserMedia({ audio: true })` is called at the start of `connect()`, before the avatar loads. The stream is released immediately; `voiceListener.start()` re-acquires later without a second prompt.
+
+### 5. ✅ Tavus conversation stopped on disconnect
+**File:** `src/demo/use-demo.ts`
+
+Previously, clicking "Stop" did not call `tavusAvatar.stopAvatar()`, so the Tavus conversation continued running (and billing) until idle timeout. Now disconnect explicitly stops the Tavus avatar — leaving the Daily room and calling `DELETE /api/v1/demo/tavus/{conversationId}`.
 
 ---
 
 ## Improvements Worth Considering
 
-### 4. 60-second stream-ready timeout is too long
+### 6. 60-second stream-ready timeout is too long
 **File:** `src/demo/use-tavus-avatar.ts:77-93`
 
 The user stares at a spinner for up to 60 seconds waiting for the replica's video track. Tavus replicas typically connect in 5-15 seconds. A 60-second timeout wastes a full minute on a broken connection before failing.
 
 **Suggestion:** Reduce to 30 seconds. Add intermediate feedback (e.g., "Still connecting..." at 10s, "This is taking longer than usual..." at 20s).
 
-### 5. Redundant hooks always instantiated
+### 7. Redundant hooks always instantiated
 **File:** `src/demo/use-demo.ts:72-73`
 
 ```typescript
@@ -105,21 +115,21 @@ Both hooks plus the ElevenLabs `useConversation()` hook (line 187) are always in
 
 **Suggestion:** Restructure the component tree so different mode components mount different hooks, or create a single `useAvatarRenderer` facade that branches internally.
 
-### 6. `console.log` used extensively in production code
+### 8. `console.log` used extensively in production code
 **Files:** `use-tavus-avatar.ts`, `use-demo.ts`
 
 The codebase has a proper structured logger (`src/lib/logger.ts`) but the demo hooks use raw `console.log` / `console.warn` throughout. These will appear in production browser consoles.
 
 **Suggestion:** Gate behind a `DEBUG` flag or remove once the Tavus integration is stable.
 
-### 7. `ScriptProcessorNode` is deprecated
+### 9. `ScriptProcessorNode` is deprecated
 **File:** `src/demo/use-voice-listener.ts`
 
 The voice listener uses `ScriptProcessorNode` for real-time audio processing, which is deprecated in the Web Audio API. It works today but will eventually be removed.
 
 **Suggestion:** Migrate to `AudioWorkletNode` when time permits. Not urgent.
 
-### 8. The 200ms `setTimeout` yield is a code smell
+### 10. The 200ms `setTimeout` yield is a code smell
 **File:** `src/demo/use-demo.ts:431-432`
 
 ```typescript
@@ -193,12 +203,14 @@ In priority order:
 
 1. ~~**Add the missing DELETE handler**~~ ✅ Done — `DELETE /api/v1/demo/tavus/[conversationId]`
 2. ~~**Merge transcribe + match**~~ ✅ Done — `POST /api/v1/demo/process`
-3. ~~**Pin the speech-end event**~~ ✅ Done — locked to `conversation.echo_end` and `conversation.utterance_end`
+3. ~~**Speech-end detection**~~ ✅ Done — calibrated timeout (~55ms/char + 1s) with app-message listener fallback. AudioContext silence detection was tried but reverted (caused audio dropouts).
 4. ~~**Add Gemini Flash pipeline**~~ ✅ Done — `NEXT_PUBLIC_PROCESSING_MODE=flash` uses Gemini 2.5 Flash for STT + classification in one call
 5. ~~**Reduce VAD silence timeout**~~ ✅ Done — reduced from 1500ms to 1000ms, configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`
-6. **Reduce stream-ready timeout** to 30s with progressive feedback
-7. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
-8. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
+6. ~~**Pre-warm mic permission**~~ ✅ Done — `getUserMedia` called before avatar init so browser prompt appears during loading
+7. ~~**Stop Tavus on disconnect**~~ ✅ Done — `stopAvatar()` called on disconnect to end billing immediately
+8. **Reduce stream-ready timeout** to 30s with progressive feedback
+9. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
+10. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
 
 ---
 
@@ -335,7 +347,7 @@ Even though echo and conversational mode bill at the same per-minute rate, the e
 
 The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound.
 
-Five improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, the Gemini Flash pipeline (single API call for STT + classification), and reduced VAD silence timeout (1500ms → 1000ms, configurable). Together these reduce perceived latency by ~700-900ms per utterance.
+Seven improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), calibrated speech-end detection (timeout-based; AudioContext silence detection was tried but reverted due to audio dropouts), the Gemini Flash pipeline (single API call for STT + classification), reduced VAD silence timeout (1500ms → 1000ms, configurable), mic permission pre-warming (prompt appears during avatar load, not after greeting), and proper Tavus disconnect (stops billing immediately on "Stop"). Together these reduce perceived latency by ~700-900ms per utterance and eliminate wasted Tavus credits.
 
 Tavus pricing is reasonable for demo-scale usage (~$59/mo for up to 20 five-minute demos). Concurrent stream limits are not published and should be tested before production deployment — this is the main scaling risk. If concurrency or cost becomes a constraint, D-ID offers the best combination of transparent pricing (~$0.05-0.10/min), documented concurrency limits (5-100 streams), and the same text-in/WebRTC-out architecture. The hook-based design makes the avatar layer swappable without touching the rest of the stack.
 

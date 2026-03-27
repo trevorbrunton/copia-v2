@@ -12,11 +12,12 @@ The system supports five avatar modes grouped into two processing pipelines, sel
 
 ### Local Pipeline (haiku, live, tavus modes)
 
-Uses client-side voice activity detection, ElevenLabs STT, and AWS Bedrock Haiku for zero-hallucination response matching against the database.
+Uses client-side voice activity detection and server-side STT + classification for zero-hallucination response matching against the database.
 
 - **Voice capture** — `useVoiceListener` (AudioContext + ScriptProcessorNode, amplitude-based VAD)
-- **Speech-to-text** — ElevenLabs Scribe API (`scribe_v1`, via `/api/v1/demo/transcribe`)
-- **Response matching** — AWS Bedrock Claude Haiku classifies question to best DB category (via `/api/v1/demo/match`)
+- **Processing** — Unified `POST /api/v1/demo/process` endpoint handles STT + classification in a single round-trip:
+  - **Flash pipeline** (`NEXT_PUBLIC_PROCESSING_MODE=flash`): Gemini 2.5 Flash — audio → transcript + category in one multimodal call
+  - **Default pipeline** (unset or `default`): ElevenLabs Scribe STT → Bedrock Haiku classifier (two sequential API calls, one server round-trip)
 - **Response playback** — Pre-recorded video/audio (haiku), PCM sent to LiveAvatar (live), or text echoed to Tavus (tavus)
 
 ### Agent Pipeline (video, audio modes)
@@ -147,7 +148,8 @@ Fallback: MP3 audio if avatar not ready or speakAudio fails
 **Pipeline:** Local | **Avatar:** Tavus Conversational Video Interface (WebRTC via Daily.co)
 
 ```
-User connects → status badge: "Initialising"
+User clicks "Start Conversation" → status badge: "Initialising"
+├── Pre-warm mic permission (getUserMedia, then release — prompt appears during avatar load)
 ├── tavusAvatar.initAvatar():
 │   ├── POST /api/v1/demo/tavus → create conversation
 │   │   └── Returns { conversationId, conversationUrl (Daily.co room) }
@@ -158,23 +160,29 @@ User connects → status badge: "Initialising"
 ├── 200ms yield → React flushes mediaStream → useEffect sets <video srcObject>
 ├── Play greeting: tavusAvatar.echo(greeting.text)
 │   └── Send Daily app message { event_type: "conversation.echo", text }
-├── Start voiceListener (continuous VAD)
+│   └── Wait estimated duration (text.length * 55ms + 1s, min 3s)
+├── Start voiceListener (continuous VAD, mic permission already granted)
 │
 User speaks
 ├── VAD captures PCM Int16
 ├── Listener paused
-├── POST /api/v1/demo/transcribe → ElevenLabs STT
-├── POST /api/v1/demo/match → Bedrock Haiku classifier
+├── POST /api/v1/demo/process → STT + classification (Gemini Flash or ElevenLabs+Bedrock)
 ├── Display answer text in chat
 ├── playTextOnTavus():
 │   ├── Send Daily app message with response text
-│   └── Wait estimated duration (text.length * 60ms, min 3s)
+│   └── Wait estimated duration (text.length * 55ms + 1s, min 3s)
 ├── Listener resumed
 └── Ready for next question
 
+User clicks "Stop" or navigates away:
+├── tavusAvatar.stopAvatar():
+│   ├── Leave Daily room (call.leave + call.destroy)
+│   └── DELETE /api/v1/demo/tavus/{conversationId} → ends conversation server-side
+└── voiceListener.stop()
+
 Assets: Response text only — Tavus generates voice+lip-sync from text
 Fallback: MP3 audio if Tavus echo fails
-Cleanup: DELETE /api/v1/demo/tavus/{conversationId} on disconnect
+Cleanup: Automatic on disconnect, unmount, and page unload
 ```
 
 ### Mode 4: Haiku (Bedrock Matcher + Pre-recorded Video)
@@ -243,6 +251,10 @@ User clicks button (user gesture — unlocks browser audio)
     │
     ├──▶ Status badge shows "Initialising" (violet, pulsing)
     │
+    ├──▶ Pre-warm mic permission (local pipeline modes only):
+    │    getUserMedia({ audio: true }) → release immediately
+    │    Browser prompt appears during avatar loading, not after greeting
+    │
     ├──▶ Init avatar renderer (blocks until ready):
     │    live  → LiveAvatar session (token + LiveKit + WebSocket)
     │    tavus → Tavus conversation (Daily.co room + WebRTC)
@@ -270,22 +282,18 @@ User clicks button (user gesture — unlocks browser audio)
 User speaks → VAD detects speech above threshold (0.015 RMS)
     │
     ▼
-User pauses → silence timeout (1.5s) → utterance captured as PCM Int16
+User pauses → silence timeout (1000ms, configurable) → utterance captured as PCM Int16
     │   (minimum speech duration: 400ms to filter noise)
     │
     ▼
 Listener paused (prevents feedback loop during processing)
     │
     ▼
-POST /api/v1/demo/transcribe
-    │  PCM → WAV header → ElevenLabs STT (scribe_v1, lang: eng)
-    │  Returns: { text: "What are the fees?" }
-    │
-    ▼
-POST /api/v1/demo/match
-    │  User text → Bedrock Haiku classifier
-    │  Loads demo_responses + demo_question_patterns from DB (cached)
-    │  Returns: { category: "fees", answerText: "...", audioUrl, pcmUrl, videoUrl }
+POST /api/v1/demo/process (single round-trip)
+    │  PCM → WAV header → STT + classification:
+    │    Flash mode:   Gemini 2.5 Flash (audio → transcript + category)
+    │    Default mode: ElevenLabs STT → Bedrock Haiku classifier
+    │  Returns: { text, category, answerText, audioUrl, pcmUrl, videoUrl }
     │
     ▼
 Show answer text in chat panel
@@ -299,7 +307,7 @@ Show answer text in chat panel
     │   └── Fallback: play MP3 if avatar not ready
     │
     └── Tavus mode: echo text via Daily.co app message
-        └── Wait estimated duration
+        └── Wait estimated duration (~55ms/char + 1s, min 3s)
         └── Fallback: play MP3 if echo fails
     │
     ▼
@@ -352,7 +360,7 @@ components/demo/demo-page.tsx     Client component (useDemo hook)
 useDemo()
     │
     ├── useVoiceListener()        Continuous VAD + PCM capture (local pipeline)
-    │     speechThreshold: 0.015, silenceTimeoutMs: 1500, minSpeechDurationMs: 400
+    │     speechThreshold: 0.015, silenceTimeoutMs: 1000 (configurable), minSpeechDurationMs: 400
     │     onUtterance callback → handleUtterance
     │     pause()/resume() — suspended during response playback
     │
@@ -366,8 +374,9 @@ useDemo()
     │     WebSocket event listener for agent.speak_ended
     │
     └── useTavusAvatar()          Tavus CVI via Daily.co (tavus mode)
-          initAvatar() → echo(text) → stopAvatar()
+          initAvatar() → echo(text): Promise<void> → stopAvatar()
           mediaStream exposed for <video srcObject>
+          Disconnect calls stopAvatar() → leaves Daily room + DELETEs conversation
 ```
 
 ---
@@ -402,19 +411,31 @@ Pre-recorded files are served from an S3 bucket behind CloudFront (`NEXT_PUBLIC_
 
 All demo routes are intentionally unauthenticated (public demo page).
 
-### POST /api/v1/demo/transcribe
+### POST /api/v1/demo/process
 
-Converts raw PCM audio to text via ElevenLabs STT.
+Unified endpoint: transcribes PCM audio and classifies the question in a single round-trip.
+
+- **Input:** `multipart/form-data` — `audio` (PCM blob), `sampleRate` (number)
+- **Process:** Pipeline selected by `NEXT_PUBLIC_PROCESSING_MODE`:
+  - `"flash"`: PCM → WAV → Gemini 2.5 Flash (STT + classification in one multimodal call)
+  - `"default"`: PCM → WAV → ElevenLabs STT → Bedrock Haiku classifier
+- **Output:** `{ text, category, answerText, audioUrl, pcmUrl, videoUrl }` or `{ text: "" }` if no speech
+- **Limits:** Audio max 10MB
+- **Env (flash):** `GEMINI_API_KEY`, `GEMINI_MODEL` (optional)
+- **Env (default):** `ELEVENLABS_API_KEY`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BEDROCK_MODEL_ID`
+
+### POST /api/v1/demo/transcribe (legacy)
+
+Converts raw PCM audio to text via ElevenLabs STT. Kept for standalone use; main flow uses `/process`.
 
 - **Input:** `multipart/form-data` — `audio` (PCM blob), `sampleRate` (number)
 - **Process:** Wrap PCM in WAV header → POST to ElevenLabs STT (`scribe_v1`, `eng`)
 - **Output:** `{ text: string }`
-- **Limits:** Audio max 10MB
 - **Env:** `ELEVENLABS_API_KEY`
 
-### POST /api/v1/demo/match
+### POST /api/v1/demo/match (legacy)
 
-Classifies a user question to a response category via Bedrock Haiku.
+Classifies a user question to a response category via Bedrock Haiku. Kept for standalone use; main flow uses `/process`.
 
 - **Input:** `{ text: string }`
 - **Process:** Load DB categories (cached) → build prompt → Bedrock Haiku → match category
@@ -438,6 +459,15 @@ Creates a Tavus CVI conversation.
 - **Process:** POST to `tavusapi.com/v2/conversations` with `persona_id`, optional `replica_id`
 - **Output:** `{ conversationId, conversationUrl }` (Daily.co room URL)
 - **Env:** `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
+
+### DELETE /api/v1/demo/tavus/[conversationId]
+
+Ends a Tavus CVI conversation to stop billing.
+
+- **Input:** `conversationId` (path parameter)
+- **Process:** DELETE to `tavusapi.com/v2/conversations/{id}` with API key
+- **Output:** `{ success: true }` or error
+- **Called by:** `stopAvatar()` on disconnect, and on component unmount
 
 ### POST /api/v1/demo/tts
 

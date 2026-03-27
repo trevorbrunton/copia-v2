@@ -11,7 +11,7 @@ The processing pipeline is selected by `NEXT_PUBLIC_PROCESSING_MODE`:
 **Flash pipeline** (`NEXT_PUBLIC_PROCESSING_MODE=flash`) — single external API call:
 ```
 User speaks
-  → VAD (client-side)
+  → VAD (client-side, 1000ms silence timeout)
   → POST /api/v1/demo/process (PCM → WAV → Gemini 2.5 Flash: STT + classification in one call)
   → tavusAvatar.echo(answerText)
   → Tavus replica speaks with lip-sync
@@ -20,7 +20,7 @@ User speaks
 **Default pipeline** (`NEXT_PUBLIC_PROCESSING_MODE=default`) — two external API calls:
 ```
 User speaks
-  → VAD (client-side)
+  → VAD (client-side, 1000ms silence timeout)
   → POST /api/v1/demo/process (PCM → WAV → ElevenLabs STT → Bedrock Haiku classifier)
   → tavusAvatar.echo(answerText)
   → Tavus replica speaks with lip-sync
@@ -195,9 +195,10 @@ In priority order:
 2. ~~**Merge transcribe + match**~~ ✅ Done — `POST /api/v1/demo/process`
 3. ~~**Pin the speech-end event**~~ ✅ Done — locked to `conversation.echo_end` and `conversation.utterance_end`
 4. ~~**Add Gemini Flash pipeline**~~ ✅ Done — `NEXT_PUBLIC_PROCESSING_MODE=flash` uses Gemini 2.5 Flash for STT + classification in one call
-5. **Reduce stream-ready timeout** to 30s with progressive feedback
-6. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
-7. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
+5. ~~**Reduce VAD silence timeout**~~ ✅ Done — reduced from 1500ms to 1000ms, configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`
+6. **Reduce stream-ready timeout** to 30s with progressive feedback
+7. **Deprecate Live (HeyGen) mode** — remove `useAvatar`, `/api/v1/demo/avatar`, and `@heygen/liveavatar-web-sdk` dependency
+8. **Clean up remaining dead code** — ElevenLabs agent pipeline, unused hooks, video/haiku mode code (if no longer needed)
 
 ---
 
@@ -217,8 +218,51 @@ The Flash pipeline reduces external dependencies from 2 services to 1 and elimin
 
 ---
 
+## Latency Budget
+
+Estimated end-to-end latency from user finishing speech to avatar starting to speak:
+
+| Phase | Before | After | Saving |
+|---|---|---|---|
+| VAD silence timeout | 1500ms | 1000ms | **500ms** |
+| Network: client → server | ~50ms | ~50ms | — |
+| STT (ElevenLabs) | ~800-1500ms | ~800-1500ms (default) or 0ms (flash) | — |
+| Network: server → Bedrock | ~100ms | ~100ms (default) or 0ms (flash) | — |
+| Classification (Bedrock Haiku) | ~300-500ms | ~300-500ms (default) or 0ms (flash) | — |
+| Gemini Flash (STT + classify) | N/A | ~1000-2000ms (flash only) | — |
+| Network: server → client | ~50ms | ~50ms | — |
+| Network: second round-trip | ~200ms | 0ms | **200ms** |
+| **Total (default pipeline)** | **~3000-3900ms** | **~2300-3200ms** | **~700ms** |
+| **Total (flash pipeline)** | — | **~2100-3100ms** | **~900ms** |
+
+The biggest single win is the VAD silence timeout reduction (500ms on every utterance). The merged endpoint saves ~200ms by eliminating a network round-trip. The Flash pipeline saves an additional ~200ms by running STT + classification in a single inference instead of sequentially.
+
+The silence timeout is configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`. Lower values feel snappier but risk cutting off mid-sentence pauses. 1000ms is a reasonable starting point — tune based on real user testing.
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `NEXT_PUBLIC_AVATAR_MODE` | No | `"audio"` | Avatar renderer: `"tavus"`, `"live"`, `"video"`, `"haiku"`, `"audio"` |
+| `NEXT_PUBLIC_PROCESSING_MODE` | No | `"default"` | Processing pipeline: `"flash"` (Gemini) or `"default"` (ElevenLabs + Bedrock) |
+| `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS` | No | `1000` | Milliseconds of silence before ending an utterance |
+| `TAVUS_API_KEY` | For tavus mode | — | Tavus API key (server-side only) |
+| `TAVUS_PERSONA_ID` | For tavus mode | — | Tavus persona ID |
+| `TAVUS_REPLICA_ID` | No | `""` | Optional Tavus replica ID |
+| `GEMINI_API_KEY` | For flash mode | — | Google Gemini API key |
+| `GEMINI_MODEL` | No | `"gemini-2.5-flash"` | Gemini model ID |
+| `ELEVENLABS_API_KEY` | For default mode | — | ElevenLabs API key |
+| `AWS_REGION` | For default mode | `"ap-southeast-2"` | AWS region for Bedrock |
+| `AWS_ACCESS_KEY_ID` | For default mode | — | AWS credentials |
+| `AWS_SECRET_ACCESS_KEY` | For default mode | — | AWS credentials |
+| `BEDROCK_MODEL_ID` | No | `"au.anthropic.claude-haiku-4-5-20251001-v1:0"` | Bedrock model ID |
+
+---
+
 ## Summary
 
 The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound.
 
-Four improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, and the Gemini Flash pipeline (single API call for STT + classification). The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.
+Five improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, the Gemini Flash pipeline (single API call for STT + classification), and reduced VAD silence timeout (1500ms → 1000ms, configurable). Together these reduce perceived latency by ~700-900ms per utterance. The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.

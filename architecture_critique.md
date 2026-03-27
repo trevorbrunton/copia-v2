@@ -261,8 +261,62 @@ The silence timeout is configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`. Lo
 
 ---
 
+## Avatar Platform Pricing Comparison
+
+Pricing as of early 2025 — verify with vendors for current rates.
+
+| Platform | Monthly Fee | Included Minutes | Overage/min | Text Input | WebRTC | Notes |
+|---|---|---|---|---|---|---|
+| **Tavus CVI** (current) | $59 Starter / $397 Growth | 100 / 1,250 | $0.37 / $0.32 | Yes (echo) | Yes (Daily.co) | 30s min charge, 6s increments. Echo and conversational bill the same. |
+| **HeyGen Interactive Avatar** | ~$59-99/mo | Varies by plan | ~$0.04-0.10 | Yes | Yes | Different SDK from LITE. Pricing often negotiated. |
+| **HeyGen LiveAvatar LITE** (current) | ~$72/mo (Business) | Credit-based | ~$0.50-1.00 | No (audio only) | Yes (LiveKit) | Contact sales for LITE rates. |
+| **D-ID Agents** | $5.90 Lite / $49 Pro | Varies | ~$0.05-0.10 | Yes | Yes | Most transparent public pricing. Multiple TTS providers. |
+| **Simli** | Pay-as-you-go | Trial minutes | ~$0.02-0.04 | Audio in (BYOTTS) | Yes | Cheapest per-minute. Bring your own TTS. |
+| **Synthesia** | $22-67/mo | 10-30 min | N/A | Limited beta | Unclear | Focused on async video, not real-time interactive. |
+| **NVIDIA Tokkio** | Enterprise only | Custom | Custom | Yes | Yes | No public pricing. |
+
+### Cost Analysis for This Demo
+
+A typical investor demo conversation runs ~5 minutes. At current Tavus Starter pricing:
+
+| Scenario | Monthly Cost |
+|---|---|
+| 10 demos/month (within 100 min included) | $59 (plan fee only) |
+| 20 demos/month (100 min included + ~0 overage) | $59 |
+| 50 demos/month (~250 min, 150 min overage) | $59 + 150 × $0.37 = **$114.50** |
+| 100 demos/month (~500 min, 400 min overage) | $59 + 400 × $0.37 = **$207** |
+
+At Growth tier ($397/mo, 1,250 included min), you'd need 250+ demos/month before overages kick in.
+
+### If Scaling Becomes a Concern
+
+The architecture is designed so the avatar platform is swappable. The `useTavusAvatar` hook is the only integration point — replacing it with a D-ID or Simli equivalent would require:
+
+1. A new `useXxxAvatar` hook that exposes `initAvatar()`, `echo(text)`, `interrupt()`, `stopAvatar()`, and a `mediaStream`
+2. A new server-side route to create sessions (equivalent to `POST /api/v1/demo/tavus`)
+3. A cleanup route (equivalent to `DELETE /api/v1/demo/tavus/[conversationId]`)
+
+The processing pipeline (`POST /api/v1/demo/process`), voice listener, demo orchestration, and UI components would remain unchanged.
+
+**D-ID** (~$0.05-0.10/min) would be the most direct replacement — same architecture (text in, WebRTC video out), ~3-7x cheaper per minute than Tavus. **Simli** (~$0.02-0.04/min) is cheapest but requires bringing your own TTS, adding a service dependency.
+
+### Why Tavus Echo Over Tavus Full CVI
+
+Even though echo and conversational mode bill at the same per-minute rate, the echo architecture is preferred for this demo because:
+
+- **Deterministic responses** — pre-approved text is delivered verbatim, critical for regulated fund disclosures
+- **No RAG hallucination risk** — the avatar never improvises; worst case is a safe fallback response
+- **Independent component control** — the STT, classification, and avatar layers can each be swapped or upgraded independently
+- **Auditable** — every response maps to a known category in the database; full traceability from question to answer
+
+---
+
 ## Summary
 
 The Tavus echo architecture is a deliberate and justified choice: it's the simplest way to get a continuous, visually seamless avatar stream with exact pre-approved responses. The approach is sound.
 
-Five improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, the Gemini Flash pipeline (single API call for STT + classification), and reduced VAD silence timeout (1500ms → 1000ms, configurable). Together these reduce perceived latency by ~700-900ms per utterance. The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.
+Five improvements have been implemented: conversation cleanup (DELETE endpoint + unmount cleanup), unified processing endpoint (single round-trip replacing two sequential calls), pinned speech-end detection, the Gemini Flash pipeline (single API call for STT + classification), and reduced VAD silence timeout (1500ms → 1000ms, configurable). Together these reduce perceived latency by ~700-900ms per utterance.
+
+Tavus pricing is reasonable for demo-scale usage (~$59/mo for up to 20 five-minute demos). If usage scales significantly, D-ID and Simli are viable cheaper alternatives with the same text-in/WebRTC-out architecture — the hook-based design makes the avatar layer swappable without touching the rest of the stack.
+
+The remaining work is reducing the stream-ready timeout, deprecating the HeyGen Live mode, and cleaning up dead code paths from unused avatar modes.

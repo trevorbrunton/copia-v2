@@ -15,8 +15,8 @@ interface UseTavusAvatarReturn {
   mediaStream: MediaStream | null;
   error: string | null;
   initAvatar: () => Promise<boolean>;
-  /** Send text for the replica to speak verbatim (echo mode). */
-  echo: (text: string) => void;
+  /** Send text for the replica to speak verbatim (echo mode). Resolves when speech ends. */
+  echo: (text: string) => Promise<void>;
   /** Interrupt the replica mid-sentence. */
   interrupt: () => void;
   stopAvatar: () => Promise<void>;
@@ -41,6 +41,8 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   const initializingRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
   const resolvedRef = useRef(false);
+  // Resolve function for the current echo() call — set when speaking, cleared on speech end.
+  const echoResolveRef = useRef<(() => void) | null>(null);
 
   const initAvatar = useCallback(async (): Promise<boolean> => {
     if (initializingRef.current || callRef.current) return false;
@@ -73,9 +75,22 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
       // 3. Set up participant tracking to capture the replica's media stream
       const ready = new Promise<boolean>((resolve) => {
         const timeout = setTimeout(() => {
-          console.warn("Tavus avatar stream ready timeout (30s)");
+          // Log participant state at timeout for diagnostics
+          const participants = call.participants();
+          const remoteIds = Object.keys(participants).filter((id) => id !== "local");
+          console.warn(
+            "Tavus avatar stream ready timeout (60s). Remote participants:",
+            remoteIds.length,
+            remoteIds.map((id) => ({
+              id,
+              videoState: participants[id]?.tracks?.video?.state,
+              audioState: participants[id]?.tracks?.audio?.state,
+              hasVideoTrack: !!participants[id]?.tracks?.video?.persistentTrack,
+              hasAudioTrack: !!participants[id]?.tracks?.audio?.persistentTrack,
+            }))
+          );
           resolve(false);
-        }, 30_000);
+        }, 60_000);
 
         /** Try to extract the replica's video+audio into a MediaStream. */
         const tryExtractStream = () => {
@@ -85,6 +100,12 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
             if (id === "local") continue;
             const videoTrack = p.tracks?.video?.persistentTrack;
             const audioTrack = p.tracks?.audio?.persistentTrack;
+            console.log("[tavus] tryExtractStream participant:", id, {
+              videoState: p.tracks?.video?.state,
+              audioState: p.tracks?.audio?.state,
+              hasVideoTrack: !!videoTrack,
+              hasAudioTrack: !!audioTrack,
+            });
             if (videoTrack) {
               const stream = new MediaStream();
               stream.addTrack(videoTrack);
@@ -102,23 +123,66 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         };
 
         const handleTrackStarted = (event: DailyEventObjectTrack) => {
+          console.log("[tavus] track-started:", {
+            kind: event.track?.kind,
+            isLocal: event.participant?.local,
+            participantId: event.participant?.session_id,
+          });
           if (!event.participant || event.participant.local) return;
-          if (event.track?.kind === "video") {
-            tryExtractStream();
-          }
+          // Try on any track, not just video — audio arriving means the replica is live
+          tryExtractStream();
         };
 
         const handleParticipantUpdated = (event: DailyEventObjectParticipant) => {
           if (!event.participant || event.participant.local) return;
-          if (event.participant.tracks?.video?.persistentTrack) {
-            tryExtractStream();
-          }
+          console.log("[tavus] participant-updated:", {
+            id: event.participant.session_id,
+            videoState: event.participant.tracks?.video?.state,
+            audioState: event.participant.tracks?.audio?.state,
+          });
+          tryExtractStream();
         };
 
         call.on("track-started", handleTrackStarted);
         call.on("participant-updated", handleParticipantUpdated);
 
+        call.on("participant-joined", (evt) => {
+          console.log("[tavus] participant-joined:", {
+            id: evt?.participant?.session_id,
+            local: evt?.participant?.local,
+          });
+        });
+
+        call.on("joined-meeting", (evt) => {
+          console.log("[tavus] joined-meeting:", evt);
+        });
+
+        // Listen for Tavus CVI app-messages to detect speech completion.
+        call.on("app-message", (evt) => {
+          const data = evt?.data;
+          if (!data) return;
+          console.log("[tavus] app-message:", data);
+
+          // Tavus CVI signals speech end with various event types.
+          // Check for utterance_end / echo_end / response_end patterns.
+          const eventType: string = data.event_type ?? data.type ?? "";
+          if (
+            eventType.includes("utterance_end") ||
+            eventType.includes("echo_end") ||
+            eventType.includes("response_end") ||
+            eventType.includes("stopped_speaking")
+          ) {
+            console.log("[tavus] Speech end detected via:", eventType);
+            setStatus((prev) => (prev === "speaking" ? "ready" : prev));
+            if (echoResolveRef.current) {
+              echoResolveRef.current();
+              echoResolveRef.current = null;
+            }
+          }
+        });
+
         call.on("left-meeting", () => {
+          console.warn("[tavus] left-meeting — resolving false");
           clearTimeout(timeout);
           setStatus("idle");
           setMediaStream(null);
@@ -128,7 +192,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
         call.on("error", (evt) => {
           clearTimeout(timeout);
-          console.error("Daily call error:", evt);
+          console.error("[tavus] Daily call error:", evt);
           setError(
             evt?.error?.msg ?? evt?.errorMsg ?? "Daily.co connection error"
           );
@@ -138,7 +202,9 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
       });
 
       // 4. Join the Daily room
+      console.log("[tavus] Joining Daily room:", conversationUrl);
       await call.join({ url: conversationUrl });
+      console.log("[tavus] Daily join() resolved, waiting for replica tracks...");
 
       return await ready;
     } catch (err) {
@@ -155,36 +221,51 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
   /**
    * Send text for the replica to speak verbatim with lip-sync (echo mode).
-   * Uses Daily's sendAppMessage to send a CVI interaction.
+   * Resolves when the replica signals speech completion via app-message,
+   * or after a generous fallback timeout.
    */
-  const echo = useCallback((text: string) => {
+  const echo = useCallback((text: string): Promise<void> => {
     const call = callRef.current;
     if (!call) {
       console.warn("Tavus: No active call for echo");
-      return;
+      return Promise.resolve();
     }
 
-    try {
-      setStatus("speaking");
-      call.sendAppMessage(
-        {
-          message_type: "conversation",
-          event_type: "conversation.echo",
-          properties: { modality: "text", text },
-        },
-        "*"
-      );
-
-      // Estimate speaking duration from text length (~60ms per character)
-      const estimatedDuration = Math.max(3000, text.length * 60);
-      setTimeout(() => {
+    return new Promise((resolve) => {
+      // Fallback timeout in case no speech-end event arrives (~80ms/char + 3s buffer)
+      const fallbackMs = Math.max(5000, text.length * 80 + 3000);
+      const fallback = setTimeout(() => {
+        console.warn("[tavus] echo fallback timeout fired after", fallbackMs, "ms");
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));
-      }, estimatedDuration);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Echo failed";
-      setError(msg);
-      setStatus("ready");
-    }
+        echoResolveRef.current = null;
+        resolve();
+      }, fallbackMs);
+
+      // Store resolve so the app-message listener can call it
+      echoResolveRef.current = () => {
+        clearTimeout(fallback);
+        resolve();
+      };
+
+      try {
+        setStatus("speaking");
+        call.sendAppMessage(
+          {
+            message_type: "conversation",
+            event_type: "conversation.echo",
+            properties: { modality: "text", text },
+          },
+          "*"
+        );
+      } catch (err) {
+        clearTimeout(fallback);
+        echoResolveRef.current = null;
+        const msg = err instanceof Error ? err.message : "Echo failed";
+        setError(msg);
+        setStatus("ready");
+        resolve();
+      }
+    });
   }, []);
 
   /** Interrupt the replica mid-sentence. */

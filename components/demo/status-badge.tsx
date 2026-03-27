@@ -8,6 +8,15 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
+  if (status === "initialising") {
+    return (
+      <span className="flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-medium text-violet-400 animate-pulse">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Initialising
+      </span>
+    );
+  }
+
   if (status === "ready") {
     return (
       <span className="flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60">

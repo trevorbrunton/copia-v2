@@ -16,7 +16,8 @@ interface UseAvatarReturn {
   initAvatar: () => Promise<boolean>;
   /** Attach the avatar's video+audio to a <video> element (call once stream is ready) */
   attach: (element: HTMLVideoElement) => void;
-  speakAudio: (pcmBinaryStr: string) => void;
+  /** Send PCM audio and wait for the avatar to finish speaking */
+  speakAudio: (pcmBinaryStr: string) => Promise<void>;
   stopAvatar: () => Promise<void>;
 }
 
@@ -26,6 +27,8 @@ export function useAvatar(): UseAvatarReturn {
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<LiveAvatarSessionType | null>(null);
   const initializingRef = useRef(false);
+  // Resolvers for pending speakAudio calls, keyed by event_id
+  const speakResolversRef = useRef<Map<string, () => void>>(new Map());
 
   const initAvatar = useCallback(async (): Promise<boolean> => {
     console.log("[avatar] initAvatar called, AVATAR_ID =", JSON.stringify(AVATAR_ID));
@@ -100,6 +103,35 @@ export function useAvatar(): UseAvatarReturn {
       console.log("[avatar] session.start() resolved, waiting for stream ready...");
 
       const result = await ready;
+
+      // Listen for agent.speak_ended on the WebSocket to resolve speakAudio promises.
+      // Use addEventListener (not onmessage) so we don't conflict with the SDK's own handler.
+      if (result) {
+        const ws = (session as unknown as { _sessionEventSocket: WebSocket | null })
+          ._sessionEventSocket;
+        if (ws) {
+          ws.addEventListener("message", (ev: MessageEvent) => {
+            try {
+              const data = JSON.parse(ev.data);
+              console.log("[avatar] WS event:", data.type, data.event_id);
+              if (data.type === "agent.speak_ended" && data.event_id) {
+                const resolver = speakResolversRef.current.get(data.event_id);
+                if (resolver) {
+                  console.log("[avatar] speak_ended resolved for", data.event_id);
+                  speakResolversRef.current.delete(data.event_id);
+                  setStatus((prev) => (prev === "speaking" ? "ready" : prev));
+                  resolver();
+                }
+              }
+            } catch {
+              // Not JSON or irrelevant message
+            }
+          });
+        } else {
+          console.warn("[avatar] No WebSocket found after session start — speak_ended events will not be captured");
+        }
+      }
+
       console.log("[avatar] initAvatar result:", result);
       return result;
     } catch (err) {
@@ -126,17 +158,19 @@ export function useAvatar(): UseAvatarReturn {
 
   /**
    * Send PCM audio (base64-encoded) directly to the WebSocket.
+   * Returns a promise that resolves when the avatar finishes speaking
+   * (via the `agent.speak_ended` WebSocket event).
    *
    * The SDK's `repeatAudio()` has a bug: it splits base64 at raw-byte boundaries
    * (960-char chunks) instead of base64-aligned boundaries, corrupting the encoding.
    * We bypass it and send properly chunked base64 directly per the HeyGen docs:
    * "PCM 16Bit 24KHz bytes encoded as Base64", ~1 second chunks, < 1MB per message.
    */
-  const speakAudio = useCallback((pcmBase64: string) => {
+  const speakAudio = useCallback((pcmBase64: string): Promise<void> => {
     const session = sessionRef.current;
     if (!session) {
       console.warn("Session is not connected");
-      return;
+      return Promise.resolve();
     }
 
     // Access the WebSocket directly
@@ -144,7 +178,7 @@ export function useAvatar(): UseAvatarReturn {
       ._sessionEventSocket;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       console.warn("WebSocket not open for audio");
-      return;
+      return Promise.resolve();
     }
 
     try {
@@ -170,16 +204,28 @@ export function useAvatar(): UseAvatarReturn {
         event_id: eventId,
       }));
 
-      // Estimate duration: base64 length * 3/4 = PCM bytes, 48000 bytes/sec
+      // Wait for agent.speak_ended event, with a safety timeout
       const pcmBytes = (pcmBase64.length * 3) / 4;
-      const durationMs = Math.max(3000, (pcmBytes / 48000) * 1000);
-      setTimeout(() => {
-        setStatus((prev) => (prev === "speaking" ? "ready" : prev));
-      }, durationMs);
+      const maxWaitMs = Math.max(10_000, (pcmBytes / 48000) * 1000 * 1.5);
+
+      return new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn("[avatar] speak_ended timeout, resolving anyway");
+          speakResolversRef.current.delete(eventId);
+          setStatus((prev) => (prev === "speaking" ? "ready" : prev));
+          resolve();
+        }, maxWaitMs);
+
+        speakResolversRef.current.set(eventId, () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Audio playback failed";
       setError(msg);
       setStatus("ready");
+      return Promise.resolve();
     }
   }, []);
 

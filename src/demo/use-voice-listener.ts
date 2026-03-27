@@ -19,7 +19,7 @@ import { useCallback, useRef, useState } from "react";
  */
 
 /** VAD tuning defaults */
-const DEFAULT_SPEECH_THRESHOLD = 0.015; // amplitude above this = speech
+const DEFAULT_SPEECH_THRESHOLD = 0.02; // amplitude above this = speech
 const DEFAULT_SILENCE_TIMEOUT_MS = 1500; // silence duration to end an utterance
 const DEFAULT_MIN_SPEECH_DURATION_MS = 400; // ignore utterances shorter than this
 

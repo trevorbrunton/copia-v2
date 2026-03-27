@@ -29,6 +29,7 @@ export interface AvatarSession {
 // --- Demo Page State ---
 
 export type DemoStatus =
+  | "initialising"
   | "ready"
   | "listening"
   | "processing"

@@ -8,24 +8,24 @@ System architecture for the Copia OC Mid-Cap Fund investor demo — an AI voice 
 
 ## System Overview
 
-The system supports two processing pipelines, selected by `NEXT_PUBLIC_AVATAR_MODE`:
+The system supports five avatar modes grouped into two processing pipelines, selected by `NEXT_PUBLIC_AVATAR_MODE`:
 
-### Local Pipeline (haiku + live modes)
+### Local Pipeline (haiku, live, tavus modes)
 
 Uses client-side voice activity detection, ElevenLabs STT, and AWS Bedrock Haiku for zero-hallucination response matching against the database.
 
 - **Voice capture** — `useVoiceListener` (AudioContext + ScriptProcessorNode, amplitude-based VAD)
 - **Speech-to-text** — ElevenLabs Scribe API (`scribe_v1`, via `/api/v1/demo/transcribe`)
-- **Response matching** — AWS Bedrock Claude Haiku classifies question → best DB category (via `/api/v1/demo/match`)
-- **Response playback** — Pre-recorded video/audio (haiku mode) or PCM sent to LiveAvatar (live mode)
+- **Response matching** — AWS Bedrock Claude Haiku classifies question to best DB category (via `/api/v1/demo/match`)
+- **Response playback** — Pre-recorded video/audio (haiku), PCM sent to LiveAvatar (live), or text echoed to Tavus (tavus)
 
-### Agent Pipeline (video, tavus, audio modes)
+### Agent Pipeline (video, audio modes)
 
 Uses the ElevenLabs Conversational AI agent for combined STT + RAG + response generation.
 
 - **ElevenLabs Conversational AI** — WebRTC connection for real-time STT, intent classification via category tags
 - **Category tag extraction** — Agent returns `[category_name]` tags, matched to `PREGENERATED` response map
-- **Response playback** — Pre-recorded video (video mode), Tavus CVI echo (tavus mode), or MP3 audio (audio mode)
+- **Response playback** — Pre-recorded video (video mode) or MP3 audio (audio mode)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -34,11 +34,11 @@ Uses the ElevenLabs Conversational AI agent for combined STT + RAG + response ge
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │                     useDemo() hook                        │   │
 │  │                                                          │   │
-│  │  Local Pipeline (haiku/live):    Agent Pipeline (other):  │   │
-│  │  useVoiceListener (VAD)          useConversation          │   │
-│  │    → /api/v1/demo/transcribe       (ElevenLabs WebRTC)   │   │
-│  │    → /api/v1/demo/match            → category tag parse   │   │
-│  │    → playResponse()                → playResponse()       │   │
+│  │  Local Pipeline (haiku/live/tavus): Agent Pipeline:       │   │
+│  │  useVoiceListener (VAD)             useConversation       │   │
+│  │    → /api/v1/demo/transcribe          (ElevenLabs WebRTC) │   │
+│  │    → /api/v1/demo/match               → category tag parse│   │
+│  │    → playResponse()                   → playResponse()    │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                           │                                     │
 │  ┌─────────────┐  ┌──────┴───────┐  ┌────────────────────────┐ │
@@ -61,15 +61,173 @@ Uses the ElevenLabs Conversational AI agent for combined STT + RAG + response ge
 
 ## Avatar Modes
 
-| Mode | Env Value | Input Pipeline | Output Rendering |
-|------|-----------|---------------|------------------|
-| **Haiku** | `haiku` | Local (VAD → STT → Bedrock) | Pre-recorded MP4 video + embedded audio |
-| **Live** | `live` | Local (VAD → STT → Bedrock) | LiveAvatar lip-sync from PCM |
-| **Video** | `video` | Agent (ElevenLabs Conv. AI) | Pre-recorded MP4 video + embedded audio |
-| **Tavus** | `tavus` | Agent (ElevenLabs Conv. AI) | Tavus CVI echo (Daily.co WebRTC) |
-| **Audio** | `audio` | Agent (ElevenLabs Conv. AI) | MP3 audio playback (no avatar) |
+| Mode | Env Value | Pipeline | Input | Output Rendering | Avatar Init |
+|------|-----------|----------|-------|------------------|-------------|
+| **Video** | `video` | Agent | ElevenLabs Conv. AI (WebRTC) | Pre-recorded MP4 video + embedded audio | None |
+| **Live** | `live` | Local | VAD → STT → Bedrock Haiku | HeyGen LiveAvatar lip-sync from PCM | LiveAvatar session |
+| **Tavus** | `tavus` | Local | VAD → STT → Bedrock Haiku | Tavus CVI echo via Daily.co WebRTC | Daily.co room |
+| **Haiku** | `haiku` | Local | VAD → STT → Bedrock Haiku | Pre-recorded MP4 video + embedded audio | None |
+| **Audio** | `audio` | Agent | ElevenLabs Conv. AI (WebRTC) | MP3 audio playback (no avatar video) | None |
 
-The `USE_LOCAL_PIPELINE` flag (`config.ts`) controls which pipeline is active. It is `true` for `haiku` and `live` modes.
+The `USE_LOCAL_PIPELINE` flag (`config.ts`) controls which pipeline is active. It is `true` for `haiku`, `live`, and `tavus` modes.
+
+---
+
+## Detailed Mode Architectures
+
+### Mode 1: Video (Pre-recorded MP4)
+
+**Pipeline:** Agent | **Avatar:** Dual-layer video (idle loop + response overlay)
+
+```
+User connects
+├── Play greeting video from PREGENERATED
+├── Start ElevenLabs agent (conversation.startSession, WebRTC)
+│
+User speaks
+├── ElevenLabs agent transcribes via WebRTC STT
+├── Agent returns [category_name] tagged response
+├── Parse category → lookup PREGENERATED[category]
+├── Display answer text in chat
+├── playResponse():
+│   ├── HEAD request to check videoUrl exists
+│   ├── IF video found → play MP4, wait for onended event
+│   └── ELSE → fall back to playCachedAudio (MP3)
+├── Unmute agent mic, restore volume
+└── Agent ready for next question
+
+Assets: MP4 videos, MP3 audio (fallback) — served from CloudFront CDN
+```
+
+**Dual-layer video rendering:** An idle video loops continuously on a back layer. Response videos play on a front overlay layer with opacity transitions. When the response ends, it hides — revealing the idle loop still running. No src-swapping on a single element = no flicker.
+
+### Mode 2: Live (HeyGen LiveAvatar)
+
+**Pipeline:** Local | **Avatar:** HeyGen LiveAvatar SDK (WebRTC via LiveKit)
+
+```
+User connects → status badge: "Initialising"
+├── avatar.initAvatar():
+│   ├── POST /api/v1/demo/avatar → get session token
+│   ├── Create LiveAvatarSession(token)
+│   ├── session.start() → connects to LiveKit room
+│   ├── Wait for SESSION_STREAM_READY event
+│   └── Hook addEventListener("message") on WebSocket for speak events
+├── 200ms yield → React flushes avatarReady → useEffect calls attach()
+├── session.attach(videoElement) — wires video+audio tracks
+├── Play greeting: fetch PCM → avatar.speakAudio(base64)
+├── Start voiceListener (continuous VAD)
+│
+User speaks
+├── VAD captures PCM Int16 (threshold 0.015 RMS, 1.5s silence timeout)
+├── Listener paused (prevents feedback loop)
+├── POST /api/v1/demo/transcribe → ElevenLabs STT (scribe_v1)
+├── POST /api/v1/demo/match → Bedrock Haiku classifier
+├── Display answer text in chat
+├── playPcmOnLiveAvatar():
+│   ├── Fetch PCM from CloudFront (cached in pcmCacheRef)
+│   ├── Base64 encode
+│   ├── Send via WebSocket in 64KB chunks (agent.speak messages)
+│   ├── Send agent.speak_end signal
+│   └── Wait for agent.speak_ended event (safety timeout at 1.5x duration)
+├── Listener resumed
+└── Ready for next question
+
+Assets: PCM 24kHz 16-bit mono — served from CloudFront CDN
+Fallback: MP3 audio if avatar not ready or speakAudio fails
+```
+
+**WebSocket protocol:** The SDK's built-in `repeatAudio()` has a chunking bug, so we bypass it and send base64 PCM directly:
+- `agent.speak` — audio chunk (64KB, multiple of 4 for valid base64)
+- `agent.speak_end` — signals end of audio for a given event_id
+- `agent.speak_ended` — server confirms avatar finished speaking (used to resolve the promise)
+
+### Mode 3: Tavus (CVI Streaming)
+
+**Pipeline:** Local | **Avatar:** Tavus Conversational Video Interface (WebRTC via Daily.co)
+
+```
+User connects → status badge: "Initialising"
+├── tavusAvatar.initAvatar():
+│   ├── POST /api/v1/demo/tavus → create conversation
+│   │   └── Returns { conversationId, conversationUrl (Daily.co room) }
+│   ├── Create Daily call object (no local video/audio)
+│   ├── Join Daily room via conversationUrl
+│   ├── Listen for track-started events
+│   └── Extract replica's video+audio tracks → MediaStream
+├── 200ms yield → React flushes mediaStream → useEffect sets <video srcObject>
+├── Play greeting: tavusAvatar.echo(greeting.text)
+│   └── Send Daily app message { event_type: "conversation.echo", text }
+├── Start voiceListener (continuous VAD)
+│
+User speaks
+├── VAD captures PCM Int16
+├── Listener paused
+├── POST /api/v1/demo/transcribe → ElevenLabs STT
+├── POST /api/v1/demo/match → Bedrock Haiku classifier
+├── Display answer text in chat
+├── playTextOnTavus():
+│   ├── Send Daily app message with response text
+│   └── Wait estimated duration (text.length * 60ms, min 3s)
+├── Listener resumed
+└── Ready for next question
+
+Assets: Response text only — Tavus generates voice+lip-sync from text
+Fallback: MP3 audio if Tavus echo fails
+Cleanup: DELETE /api/v1/demo/tavus/{conversationId} on disconnect
+```
+
+### Mode 4: Haiku (Bedrock Matcher + Pre-recorded Video)
+
+**Pipeline:** Local | **Avatar:** Dual-layer video (same as video mode)
+
+```
+User connects
+├── No avatar init needed
+├── Play greeting video from PREGENERATED
+├── Start voiceListener (continuous VAD)
+│
+User speaks
+├── VAD captures PCM Int16
+├── Listener paused
+├── POST /api/v1/demo/transcribe → ElevenLabs STT
+├── POST /api/v1/demo/match → Bedrock Haiku classifier
+├── Display answer text in chat
+├── playResponse():
+│   ├── HEAD request to check videoUrl exists
+│   ├── IF video found → play MP4, wait for onended event
+│   └── ELSE → fall back to playCachedAudio (MP3)
+├── Listener resumed
+└── Ready for next question
+
+Assets: MP4 videos, MP3 audio (fallback) — served from CloudFront CDN
+```
+
+**Key difference from video mode:** Haiku mode uses the local pipeline (VAD → STT → Bedrock) for zero-hallucination matching, while video mode relies on the ElevenLabs agent's RAG system. The rendering is identical.
+
+### Mode 5: Audio (Audio-only)
+
+**Pipeline:** Agent | **Avatar:** None (no video rendering)
+
+```
+User connects
+├── No avatar init
+├── Play greeting MP3 from PREGENERATED
+├── Start ElevenLabs agent (conversation.startSession, WebRTC)
+│
+User speaks
+├── ElevenLabs agent transcribes via WebRTC STT
+├── Agent returns [category_name] tagged response
+├── Parse category → lookup PREGENERATED[category]
+├── Display answer text in chat
+├── playResponse():
+│   ├── Mute agent volume (prevent overlap)
+│   ├── Play cached MP3 via <audio> element
+│   └── Restore agent volume
+└── Agent ready for next question
+
+Assets: MP3 audio files — served from CloudFront CDN
+```
 
 ---
 
@@ -78,30 +236,45 @@ The `USE_LOCAL_PIPELINE` flag (`config.ts`) controls which pipeline is active. I
 ### Flow 1: Start Conversation (All Modes)
 
 ```
-User visits /demo → "Start Conversation" button shown
+User visits /demo → "Start Conversation" button shown below avatar area
     │
     ▼
 User clicks button (user gesture — unlocks browser audio)
     │
-    ├──▶ Init avatar (live: LiveAvatar session, tavus: Daily.co room)
+    ├──▶ Status badge shows "Initialising" (violet, pulsing)
     │
-    ├──▶ Play greeting video/audio (routed by avatar mode)
+    ├──▶ Init avatar renderer (blocks until ready):
+    │    live  → LiveAvatar session (token + LiveKit + WebSocket)
+    │    tavus → Tavus conversation (Daily.co room + WebRTC)
+    │    other → no init needed (proceeds immediately)
+    │
+    ├──▶ 200ms yield (live/tavus only)
+    │    Lets React flush avatarReady/mediaStream state and trigger
+    │    useEffects that wire audio/video tracks to the <video> element.
+    │    Without this, the greeting plays before tracks are connected.
+    │
+    ├──▶ Play greeting (routed by avatar mode):
+    │    video/haiku → play MP4 video (dual-layer)
+    │    live        → fetch PCM → speakAudio() via WebSocket
+    │    tavus       → echo text via Daily.co app message
+    │    audio       → play MP3 via <audio> element
     │
     └──▶ Start input pipeline:
          Local pipeline → voiceListener.start() (continuous VAD)
          Agent pipeline → conversation.startSession() (ElevenLabs WebRTC)
 ```
 
-### Flow 2: Local Pipeline — Question → Response (haiku + live)
+### Flow 2: Local Pipeline — Question → Response (haiku, live, tavus)
 
 ```
 User speaks → VAD detects speech above threshold (0.015 RMS)
     │
     ▼
 User pauses → silence timeout (1.5s) → utterance captured as PCM Int16
+    │   (minimum speech duration: 400ms to filter noise)
     │
     ▼
-Listener paused (prevents feedback loop)
+Listener paused (prevents feedback loop during processing)
     │
     ▼
 POST /api/v1/demo/transcribe
@@ -120,15 +293,20 @@ Show answer text in chat panel
     ├── Haiku mode: play MP4 video (with embedded audio)
     │   └── Fallback: play MP3 if no video exists
     │
-    └── Live mode: fetch PCM → avatar.speakAudio(base64)
-        └── Wait estimated duration before resuming
-        └── Fallback: play MP3 if avatar not ready
+    ├── Live mode: fetch PCM → avatar.speakAudio(base64)
+    │   ├── Send chunks via WebSocket
+    │   └── Wait for agent.speak_ended event (timeout fallback)
+    │   └── Fallback: play MP3 if avatar not ready
+    │
+    └── Tavus mode: echo text via Daily.co app message
+        └── Wait estimated duration
+        └── Fallback: play MP3 if echo fails
     │
     ▼
 Listener resumed → ready for next question
 ```
 
-### Flow 3: Agent Pipeline — Question → Response (video, tavus, audio)
+### Flow 3: Agent Pipeline — Question → Response (video, audio)
 
 ```
 User speaks → ElevenLabs agent transcribes (WebRTC STT)
@@ -139,8 +317,13 @@ Agent processes via RAG → returns text with [category_name] tag
     ▼
 App extracts category → looks up PREGENERATED[category]
     │
-    ├── Match found: play pre-recorded response (video/tavus/audio)
-    └── No match: show agent's generated text in chat
+    ├── Match found:
+    │   ├── Mute agent mic + volume (epoch counter prevents stale messages)
+    │   ├── Play pre-recorded response (video or audio)
+    │   ├── Unmute mic + volume
+    │   └── Send contextual update: "wait for next question"
+    │
+    └── No match: show agent's generated text in chat (no pre-recorded media)
 ```
 
 ---
@@ -154,10 +337,13 @@ app/demo/page.tsx                 Server component (metadata)
     │
     ▼
 components/demo/demo-page.tsx     Client component (useDemo hook)
-    ├── AvatarPanel               Dual-layer video (idle loop + response overlay)
-    ├── StatusBadge               Ready / Listening / Thinking / Speaking
+    ├── AvatarPanel               Video rendering (3 modes: LiveAvatar / Tavus / dual-layer)
+    │   └── "Please press Start Conversation" shown before connect
+    ├── Start / Leave Button      Below avatar panel, toggles on connect
+    ├── StatusBadge               Initialising / Ready / Listening / Thinking / Speaking
     ├── ErrorBanner               Dismissible error display
     └── ChatPanel                 Message list with auto-scroll
+        └── "Press Start Conversation to begin" shown before connect
 ```
 
 ### Hook Architecture
@@ -165,19 +351,23 @@ components/demo/demo-page.tsx     Client component (useDemo hook)
 ```
 useDemo()
     │
-    ├── useVoiceListener()        Continuous VAD + PCM capture
-    │     speechThreshold, silenceTimeoutMs, minSpeechDurationMs (configurable)
+    ├── useVoiceListener()        Continuous VAD + PCM capture (local pipeline)
+    │     speechThreshold: 0.015, silenceTimeoutMs: 1500, minSpeechDurationMs: 400
     │     onUtterance callback → handleUtterance
     │     pause()/resume() — suspended during response playback
     │
-    ├── useConversation()         ElevenLabs agent (non-local-pipeline modes)
+    ├── useConversation()         ElevenLabs agent (agent pipeline modes)
     │     onMessage → category tag extraction → playResponse
+    │     micMuted control + volume control for pre-recorded playback
     │
     ├── useAvatar()               HeyGen LiveAvatar SDK (live mode)
-    │     initAvatar() → speakAudio(base64) → stopAvatar()
+    │     initAvatar() → speakAudio(base64): Promise → stopAvatar()
+    │     attach(videoElement) — wires video+audio tracks
+    │     WebSocket event listener for agent.speak_ended
     │
     └── useTavusAvatar()          Tavus CVI via Daily.co (tavus mode)
           initAvatar() → echo(text) → stopAvatar()
+          mediaStream exposed for <video srcObject>
 ```
 
 ---
@@ -189,14 +379,74 @@ useDemo()
 | Context | Format | Notes |
 |---|---|---|
 | Voice capture (VAD) | PCM Int16 LE, browser sample rate (~48kHz) | AudioContext + ScriptProcessorNode |
-| Transcribe API | WAV (PCM Int16 + 44-byte RIFF header) | Server wraps PCM before sending to ElevenLabs |
-| Pre-recorded audio | MP3 (`/audio/{category}.mp3`) | CloudFront CDN |
-| Pre-recorded PCM | PCM 24kHz 16-bit mono (`/audio/{category}.pcm`) | For LiveAvatar `speakAudio()` |
-| Pre-recorded video | MP4 (`/video/{category}.mp4`) | With embedded audio track |
+| Transcribe API input | WAV (PCM Int16 + 44-byte RIFF header) | Server wraps PCM before sending to ElevenLabs |
+| Pre-recorded audio | MP3 44.1kHz 128kbps (`/audio/{category}.mp3`) | CloudFront CDN, browser `<audio>` playback |
+| Pre-recorded PCM | PCM 24kHz 16-bit mono (`/audio/{category}.pcm`) | CloudFront CDN, for LiveAvatar `speakAudio()` |
+| Pre-recorded video | MP4 (`/video/{category}.mp4`) | CloudFront CDN, with embedded audio track |
+| LiveAvatar WebSocket | Base64-encoded PCM, 64KB chunks | `agent.speak` / `agent.speak_end` protocol |
 
 ### Voice Consistency
 
-All pre-recorded audio/video uses the same ElevenLabs custom cloned voice (`ELEVENLABS_VOICE_ID`). In live mode, LiveAvatar's built-in TTS is bypassed — `session.repeatAudio()` plays pre-rendered PCM directly.
+All pre-recorded audio uses the same ElevenLabs custom voice (voice ID `intqmJdN1hH5FSsuxpV3`, "Real Rob"). Generated via `scripts/generate-audio.ts`. In live mode, LiveAvatar's built-in TTS is bypassed — pre-rendered PCM is sent directly via WebSocket.
+
+### Media CDN
+
+Pre-recorded files are served from an S3 bucket behind CloudFront (`NEXT_PUBLIC_MEDIA_BASE_URL`). Cache-control: `immutable, max-age=31536000`. When files are updated:
+1. Upload to S3 via `cdk/upload-media.sh`
+2. Invalidate CloudFront cache (`/audio/*`)
+3. Users may need hard refresh due to browser `immutable` caching
+
+---
+
+## API Routes
+
+All demo routes are intentionally unauthenticated (public demo page).
+
+### POST /api/v1/demo/transcribe
+
+Converts raw PCM audio to text via ElevenLabs STT.
+
+- **Input:** `multipart/form-data` — `audio` (PCM blob), `sampleRate` (number)
+- **Process:** Wrap PCM in WAV header → POST to ElevenLabs STT (`scribe_v1`, `eng`)
+- **Output:** `{ text: string }`
+- **Limits:** Audio max 10MB
+- **Env:** `ELEVENLABS_API_KEY`
+
+### POST /api/v1/demo/match
+
+Classifies a user question to a response category via Bedrock Haiku.
+
+- **Input:** `{ text: string }`
+- **Process:** Load DB categories (cached) → build prompt → Bedrock Haiku → match category
+- **Output:** `{ category, answerText, audioUrl, pcmUrl, videoUrl }`
+- **Env:** `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BEDROCK_MODEL_ID`
+
+### POST /api/v1/demo/avatar
+
+Creates a HeyGen LiveAvatar LITE session.
+
+- **Input:** None
+- **Process:** POST to `api.liveavatar.com/v1/sessions/token` with `mode: "LITE"`, `avatar_id`
+- **Output:** `{ sessionToken: string }`
+- **Env:** `LIVEAVATAR_API_KEY`, `NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID`
+
+### POST /api/v1/demo/tavus
+
+Creates a Tavus CVI conversation.
+
+- **Input:** `{ custom_greeting?: string }` (optional)
+- **Process:** POST to `tavusapi.com/v2/conversations` with `persona_id`, optional `replica_id`
+- **Output:** `{ conversationId, conversationUrl }` (Daily.co room URL)
+- **Env:** `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
+
+### POST /api/v1/demo/tts
+
+Generates PCM audio from text via ElevenLabs TTS. Currently unused in main flow (pre-generated responses used instead).
+
+- **Input:** `{ text: string }`
+- **Process:** POST to ElevenLabs TTS API → PCM 24kHz
+- **Output:** `{ audio: string }` (base64-encoded PCM)
+- **Env:** `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
 
 ---
 
@@ -232,6 +482,32 @@ In the **agent pipeline**, responses are hardcoded in `classifier.ts` (`PREGENER
 
 ---
 
+## State Management
+
+### Busy State Machine
+
+```
+Ready → User speaks
+├── busyRef = true, micMuted = true
+├── voiceListener.pause() (local pipeline)
+├── Processing: STT + classification
+├── playResponse() — awaits completion
+└── busyRef = false, micMuted = false
+    └── voiceListener.resume() (local pipeline)
+```
+
+Prevents overlapping utterances and ensures responses complete before next input.
+
+### Epoch Counter
+
+Incremented on each `connect()` call. Used to discard stale messages from previous sessions in the ElevenLabs agent `onMessage` callback. When a pre-recorded response plays, the epoch increments to ignore any concurrent agent output.
+
+### PCM Cache
+
+`pcmCacheRef` stores base64-encoded PCM in memory after first fetch. Bounded by the fixed set of ~30 categories (~500KB each = ~15MB max). Acceptable for a demo.
+
+---
+
 ## Security Model
 
 ### API Key Protection
@@ -245,6 +521,7 @@ In the **agent pipeline**, responses are hardcoded in `classifier.ts` (`PREGENER
 | `LIVEAVATAR_API_KEY` | Server only | LiveAvatar session creation |
 | `NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID` | Client + Server | Custom avatar ID |
 | `TAVUS_API_KEY` | Server only | Tavus conversation creation |
+| `TAVUS_PERSONA_ID` / `TAVUS_REPLICA_ID` | Server only | Tavus persona + replica config |
 
 ### Input Validation
 
@@ -260,9 +537,12 @@ In the **agent pipeline**, responses are hardcoded in `classifier.ts` (`PREGENER
 |----------|-----------|
 | ElevenLabs STT fails | Error shown in banner, listener resumes |
 | Bedrock Haiku fails | Error shown in banner, listener resumes |
-| LiveAvatar session fails | Falls back to MP3 audio playback |
+| LiveAvatar session init fails | Falls back to MP3 audio playback |
+| LiveAvatar speakAudio fails | Falls back to MP3 audio playback |
+| Tavus echo fails | Falls back to MP3 audio playback |
 | Pre-recorded video missing | Falls back to MP3 audio playback |
 | ElevenLabs agent fails to connect | Error shown, text responses still work |
 | Network error during processing | Error banner, busy state cleared, listener resumes |
+| No transcribed text (empty speech) | Silently resumes listening |
 
 The system degrades gracefully — text responses always display regardless of audio or avatar failures.

@@ -42,6 +42,7 @@ export function useDemo() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlayingCached, setIsPlayingCached] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [isInitialising, setIsInitialising] = useState(false);
   const [currentVideoSrc, setCurrentVideoSrc] = useState<string | null>(null);
   const [micMuted, setMicMuted] = useState(true);
   const isConnectingRef = useRef(false);
@@ -306,24 +307,15 @@ export function useDemo() {
         );
         pcmCacheRef.current[pcmUrl] = base64;
       }
-      avatar.speakAudio(base64);
-      // Wait for estimated playback duration.
-      // PCM is 24kHz 16-bit mono → 48,000 bytes/sec.
-      // base64 length * 3/4 = original byte count
-      const pcmBytes = (base64.length * 3) / 4;
-      const durationMs = Math.max(3000, (pcmBytes / 48000) * 1000);
-      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      // speakAudio returns a promise that resolves on agent.speak_ended
+      await avatar.speakAudio(base64);
     },
     [avatar]
   );
 
   const playTextOnTavus = useCallback(
     (text: string): Promise<void> => {
-      return new Promise((resolve) => {
-        tavusAvatar.echo(text);
-        const estimatedDuration = Math.max(3000, text.length * 60);
-        setTimeout(resolve, estimatedDuration);
-      });
+      return tavusAvatar.echo(text);
     },
     [tavusAvatar]
   );
@@ -407,14 +399,13 @@ export function useDemo() {
     setMicMuted(true);
 
     try {
-      // Init avatar renderers before greeting so playResponse routes correctly.
-      // Must complete before greeting plays — avatar needs to be "ready" for
-      // playResponse to route to playTextOnLiveAvatar/playTextOnTavus.
       console.log("[demo:connect] Mode flags:", {
         USE_LIVE_AVATAR, USE_TAVUS_AVATAR, USE_VIDEO_AVATAR,
         USE_HAIKU_MODE, USE_LOCAL_PIPELINE,
       });
 
+      // Init avatar renderers before greeting so playResponse routes correctly.
+      setIsInitialising(true);
       if (USE_TAVUS_AVATAR) {
         avatarReadyRef.current = await tavusAvatar.initAvatar();
         console.log("[demo:connect] Tavus initAvatar result:", avatarReadyRef.current);
@@ -430,6 +421,14 @@ export function useDemo() {
         }
       } else {
         console.log("[demo:connect] No live avatar mode — skipping avatar init");
+      }
+      setIsInitialising(false);
+
+      // Yield to let React flush state and trigger useEffects that wire
+      // audio/video to the <video> element — otherwise the greeting plays
+      // before tracks are connected and audio is inaudible.
+      if ((USE_LIVE_AVATAR || USE_TAVUS_AVATAR) && avatarReadyRef.current) {
+        await new Promise((r) => setTimeout(r, 200));
       }
 
       // Play greeting (avatar is ready at this point, so routing is correct)
@@ -519,6 +518,7 @@ export function useDemo() {
     setCurrentVideoSrc(null);
     setIsPlayingCached(false);
     setIsProcessing(false);
+    setIsInitialising(false);
     setBusy(false);
     setMicMuted(true);
     setHasStarted(false);
@@ -529,14 +529,21 @@ export function useDemo() {
 
   // ─── Status ───────────────────────────────────────────────────────
 
-  const demoStatus: DemoStatus = isProcessing
+  // isBusy is included in the "speaking" check to prevent a brief "Ready"
+  // flash during the microtask gap between playback ending and setBusy(false).
+  // isProcessing is checked first, so isBusy during the transcribe/match phase
+  // correctly shows "processing" rather than "speaking".
+  const demoStatus: DemoStatus = isInitialising
+    ? "initialising"
+    : isProcessing
     ? "processing"
     : isPlayingCached ||
         currentVideoSrc !== null ||
         avatar.status === "speaking" ||
-        tavusAvatar.status === "speaking"
+        tavusAvatar.status === "speaking" ||
+        isBusy
       ? "speaking"
-      : voiceListener.isListening && !isBusy
+      : voiceListener.isListening
         ? "listening"
         : "ready";
 

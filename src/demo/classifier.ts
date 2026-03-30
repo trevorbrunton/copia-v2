@@ -56,6 +56,12 @@ export const PREGENERATED: Record<string, { audioUrl: string; pcmUrl: string; vi
     videoUrl: `${MEDIA_BASE}/video/fund_details.mp4`,
     text: "The key details are as follows. The APIR code is OPS0472AU, and the ARSN is 679 449 293. The fund's inception date is the sixteenth of November 2023. The responsible entity is Copia Investment Partners Limited. The benchmark is the S and P ASX MidCap 50 Accumulation Index, and our objective is to outperform that benchmark by two percent per annum over rolling five-year periods, after fees and taxes.",
   },
+  date_of_fund_creation: {
+    audioUrl: `${MEDIA_BASE}/audio/date_of_fund_creation.mp3`,
+    pcmUrl: `${MEDIA_BASE}/audio/date_of_fund_creation.pcm`,
+    videoUrl: `${MEDIA_BASE}/video/date_of_fund_creation.mp4`,
+    text: "The fund's inception date is the sixteenth of November 2023.",
+  },
   fees: {
     audioUrl: `${MEDIA_BASE}/audio/fees.mp3`,
     pcmUrl: `${MEDIA_BASE}/audio/fees.pcm`,

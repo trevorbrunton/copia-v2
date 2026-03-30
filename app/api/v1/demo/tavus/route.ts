@@ -21,7 +21,20 @@ export async function POST(req: Request) {
     }
 
     const replicaId = process.env.TAVUS_REPLICA_ID ?? "";
-    const personaId = process.env.TAVUS_PERSONA_ID ?? "";
+    const defaultPersonaId = process.env.TAVUS_PERSONA_ID ?? "";
+
+    // Parse optional overrides from request body
+    let requestPersonaId: string | undefined;
+    let customGreeting: string | undefined;
+    try {
+      const body = await req.json();
+      requestPersonaId = body.persona_id;
+      customGreeting = body.custom_greeting;
+    } catch {
+      // No body or invalid JSON — use defaults
+    }
+
+    const personaId = requestPersonaId || defaultPersonaId;
 
     if (!personaId) {
       throw new ExternalServiceError(
@@ -30,16 +43,7 @@ export async function POST(req: Request) {
       );
     }
 
-    logger.info({ traceId }, "demo:tavus conversation request");
-
-    // Parse optional custom greeting from request body
-    let customGreeting: string | undefined;
-    try {
-      const body = await req.json();
-      customGreeting = body.custom_greeting;
-    } catch {
-      // No body or invalid JSON — use persona default
-    }
+    logger.info({ traceId, personaId }, "demo:tavus conversation request");
 
     const conversationBody: Record<string, unknown> = {
       persona_id: personaId,

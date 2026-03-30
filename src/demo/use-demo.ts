@@ -376,7 +376,7 @@ export function useDemo() {
 
   // ─── Connect ──────────────────────────────────────────────────────
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (personaId?: string) => {
     if (isConnectingRef.current) return;
     isConnectingRef.current = true;
     setError(null);
@@ -406,7 +406,7 @@ export function useDemo() {
       // Init avatar renderers before greeting so playResponse routes correctly.
       setIsInitialising(true);
       if (USE_TAVUS_AVATAR) {
-        avatarReadyRef.current = await tavusAvatar.initAvatar();
+        avatarReadyRef.current = await tavusAvatar.initAvatar(personaId);
         console.log("[demo:connect] Tavus initAvatar result:", avatarReadyRef.current);
         if (!avatarReadyRef.current) {
           console.warn("Tavus avatar failed to connect — running in audio-only mode");

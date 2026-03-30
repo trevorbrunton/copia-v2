@@ -243,3 +243,9 @@ Complete list of pre-generated responses for the OC Mid-Cap Fund investor demo a
 **Label:** Out-of-scope question
 
 > That's a great question. For more detail on that topic, I'd suggest speaking directly with our investor relations team who can provide you with the most current and comprehensive information.
+
+## date_of_fund_creation
+
+**Label:** fund origin date
+
+> The fund's inception date is the sixteenth of November 2023.

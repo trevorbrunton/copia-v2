@@ -14,7 +14,7 @@ interface UseTavusAvatarReturn {
   status: TavusAvatarStatus;
   mediaStream: MediaStream | null;
   error: string | null;
-  initAvatar: () => Promise<boolean>;
+  initAvatar: (personaId?: string) => Promise<boolean>;
   /** Send text for the replica to speak verbatim (echo mode). Resolves when speech ends. */
   echo: (text: string) => Promise<void>;
   /** Interrupt the replica mid-sentence. */
@@ -44,7 +44,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   // Resolve function for the current echo() call — set when speaking, cleared on speech end.
   const echoResolveRef = useRef<(() => void) | null>(null);
 
-  const initAvatar = useCallback(async (): Promise<boolean> => {
+  const initAvatar = useCallback(async (personaId?: string): Promise<boolean> => {
     if (initializingRef.current || callRef.current) return false;
     initializingRef.current = true;
     resolvedRef.current = false;
@@ -53,7 +53,11 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
     try {
       // 1. Create conversation via our server
-      const res = await fetch("/api/demo/tavus", { method: "POST" });
+      const res = await fetch("/api/demo/tavus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(personaId ? { persona_id: personaId } : {}),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(

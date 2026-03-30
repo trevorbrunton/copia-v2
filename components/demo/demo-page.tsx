@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useDemo } from "@/src/demo/use-demo";
 import { PERSONA, USE_TAVUS_AVATAR, USE_LIVE_AVATAR } from "@/src/demo/config";
 import { AvatarPanel } from "./avatar-panel";
@@ -9,12 +10,27 @@ import { ErrorBanner } from "./error-banner";
 import { Button } from "@/components/ui/button";
 import { Mic, PhoneOff } from "lucide-react";
 
+const PERSONA_OPTIONS = [
+  { id: "p9e3e1a0de0b", label: "Generic" },
+  { id: "p972eef6878f", label: "Custom" },
+] as const;
+
 export function DemoPage() {
   const {
-    status, messages, error, connect, disconnect, isConnected,
-    avatarStream, attachAvatar, avatarReady,
-    currentVideoSrc, handleVideoEnded,
+    status,
+    messages,
+    error,
+    connect,
+    disconnect,
+    isConnected,
+    avatarStream,
+    attachAvatar,
+    avatarReady,
+    currentVideoSrc,
+    handleVideoEnded,
   } = useDemo();
+
+  const [selectedPersona, setSelectedPersona] = useState(PERSONA_OPTIONS[0].id);
 
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] overflow-hidden">
@@ -58,13 +74,37 @@ export function DemoPage() {
                 </Button>
               </div>
             ) : (
-              <Button
-                onClick={connect}
-                className="bg-white text-[var(--oc-navy)] hover:bg-white/90 gap-2"
-              >
-                <Mic className="h-4 w-4" />
-                Start Conversation
-              </Button>
+              <div className="flex flex-col items-center gap-3">
+                {USE_TAVUS_AVATAR && (
+                  <div className="flex items-center gap-4">
+                    {PERSONA_OPTIONS.map((p) => (
+                      <label
+                        key={p.id}
+                        className="flex items-center gap-1.5 cursor-pointer text-xs text-white/70 hover:text-white/90"
+                      >
+                        <input
+                          type="radio"
+                          name="persona"
+                          value={p.id}
+                          checked={selectedPersona === p.id}
+                          onChange={() => setSelectedPersona(p.id)}
+                          className="accent-white"
+                        />
+                        {p.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <Button
+                  onClick={() =>
+                    connect(USE_TAVUS_AVATAR ? selectedPersona : undefined)
+                  }
+                  className="bg-white text-[var(--oc-navy)] hover:bg-white/90 gap-2"
+                >
+                  <Mic className="h-4 w-4" />
+                  Start Conversation
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -84,7 +124,11 @@ export function DemoPage() {
 
           <ErrorBanner message={error} />
 
-          <ChatPanel messages={messages} status={status} isConnected={isConnected} />
+          <ChatPanel
+            messages={messages}
+            status={status}
+            isConnected={isConnected}
+          />
         </div>
       </main>
     </div>

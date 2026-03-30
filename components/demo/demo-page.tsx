@@ -30,7 +30,7 @@ export function DemoPage() {
     handleVideoEnded,
   } = useDemo();
 
-  const [selectedPersona, setSelectedPersona] = useState(PERSONA_OPTIONS[0].id);
+  const [selectedPersona, setSelectedPersona] = useState<string>(PERSONA_OPTIONS[0].id);
 
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] overflow-hidden">

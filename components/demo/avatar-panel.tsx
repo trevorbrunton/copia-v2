@@ -52,12 +52,21 @@ export function AvatarPanel({
   const attachedRef = useRef(false);
   const [showResponse, setShowResponse] = useState(false);
 
-  // Handle Tavus media stream
+  // Handle Tavus media stream — start muted for autoplay policy, then unmute
   useEffect(() => {
-    if (streamRef.current && mediaStream) {
-      streamRef.current.srcObject = mediaStream;
-      streamRef.current.muted = false;
-    }
+    const video = streamRef.current;
+    if (!video || !mediaStream) return;
+    video.srcObject = mediaStream;
+    video.muted = true;
+    video.play()
+      .then(() => {
+        // Unmute after playback starts — user gesture from "Start" button
+        // should satisfy autoplay policy, but the play() must succeed first.
+        video.muted = false;
+      })
+      .catch((err) => {
+        console.warn("[avatar-panel] Tavus stream play failed:", err);
+      });
   }, [mediaStream]);
 
   // Handle LiveAvatar attach — SDK manages its own tracks via session.attach()

@@ -15,7 +15,7 @@ import { demoResponses, demoQuestionPatterns } from "@/src/db/schema";
 import { logger } from "@/src/lib/logger";
 
 const MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || "au.anthropic.claude-haiku-4-5-20251001-v1:0";
+  process.env.BEDROCK_MODEL_ID || "anthropic.claude-haiku-4-5-20251001-v1:0";
 const ANTHROPIC_VERSION = "bedrock-2023-05-31";
 
 let client: BedrockRuntimeClient | null = null;

@@ -243,7 +243,7 @@ Use `@/*` to import from the project root.
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
 - Flash env vars: `GEMINI_API_KEY`, `GEMINI_MODEL` (optional, default `gemini-2.5-flash`)
 - Default pipeline env vars: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`
-- AWS env vars (default pipeline): `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BEDROCK_MODEL_ID` (optional)
+- Anthropic env vars (default pipeline classifier): `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional, default `claude-haiku-4-5-20251001`)
 - LiveAvatar env vars: `LIVEAVATAR_API_KEY`, `NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID`
 - Tavus env vars: `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
 

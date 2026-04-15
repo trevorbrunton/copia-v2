@@ -1,37 +1,17 @@
 /**
- * Bedrock Haiku response matcher for the "haiku" avatar mode.
+ * Claude Haiku response matcher for the investor demo.
  *
  * Loads all demo responses + question patterns from the database,
- * sends them to Claude Haiku on AWS Bedrock, and asks it to pick
+ * sends them to Claude Haiku via the Anthropic API, and asks it to pick
  * the best matching category for a user's question.
  */
 
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
 import { db } from "@/src/db";
 import { demoResponses, demoQuestionPatterns } from "@/src/db/schema";
 import { logger } from "@/src/lib/logger";
 
-const MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || "anthropic.claude-haiku-4-5-20251001-v1:0";
-const ANTHROPIC_VERSION = "bedrock-2023-05-31";
-
-let client: BedrockRuntimeClient | null = null;
-
-function getClient(): BedrockRuntimeClient {
-  if (!client) {
-    client = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION || "ap-southeast-2",
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-      },
-    });
-  }
-  return client;
-}
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
+const MODEL_ID = process.env.ANTHROPIC_MODEL_ID || "claude-haiku-4-5-20251001";
 
 export interface MatchResult {
   category: string;
@@ -102,7 +82,7 @@ ${categoryDescriptions}`;
 // ─── Public API ─────────────────────────────────────────────────────
 
 /**
- * Match a user question to the best demo response using Bedrock Haiku.
+ * Match a user question to the best demo response using Claude Haiku.
  *
  * 1. Loads all responses + patterns from the DB (cached after first call)
  * 2. Builds a prompt listing every category with its label and example questions
@@ -113,25 +93,29 @@ export async function matchQuestion(userText: string): Promise<MatchResult> {
   const MEDIA_BASE = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? "";
   const { responses, systemPrompt } = await getCachedData();
 
-  const requestBody = {
-    anthropic_version: ANTHROPIC_VERSION,
-    max_tokens: 50,
-    temperature: 0,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userText }],
-  };
-
-  const command = new InvokeModelCommand({
-    modelId: MODEL_ID,
-    contentType: "application/json",
-    accept: "application/json",
-    body: JSON.stringify(requestBody),
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL_ID,
+      max_tokens: 50,
+      temperature: 0,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userText }],
+    }),
+    signal: AbortSignal.timeout(15_000),
   });
 
-  const bedrockResponse = await getClient().send(command);
-  const responseBody = JSON.parse(
-    new TextDecoder().decode(bedrockResponse.body)
-  );
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Anthropic API error: ${res.status} ${errBody}`);
+  }
+
+  const responseBody = await res.json();
 
   const rawCategory =
     responseBody.content
@@ -149,7 +133,7 @@ export async function matchQuestion(userText: string): Promise<MatchResult> {
       inputTokens: responseBody.usage?.input_tokens,
       outputTokens: responseBody.usage?.output_tokens,
     },
-    "bedrock-matcher"
+    "anthropic-matcher"
   );
 
   // Find the matched response
@@ -158,7 +142,6 @@ export async function matchQuestion(userText: string): Promise<MatchResult> {
     responses.find((r) => r.category === "fallback");
 
   if (!matched) {
-    // Should never happen if DB is seeded, but handle gracefully
     return {
       category: "fallback",
       label: "Fallback",

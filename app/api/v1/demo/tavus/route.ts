@@ -21,24 +21,21 @@ export async function POST(req: Request) {
     }
 
     const replicaId = process.env.TAVUS_REPLICA_ID ?? "";
-    const defaultPersonaId = process.env.TAVUS_PERSONA_ID ?? "";
 
-    // Parse optional overrides from request body
-    let requestPersonaId: string | undefined;
+    // The client always sends a persona_id selected via NEXT_PUBLIC_TAVUS_PERSONA_*.
+    let personaId: string | undefined;
     let customGreeting: string | undefined;
     try {
       const body = await req.json();
-      requestPersonaId = body.persona_id;
+      personaId = body.persona_id;
       customGreeting = body.custom_greeting;
     } catch {
-      // No body or invalid JSON — use defaults
+      // No body — fall through to validation below
     }
-
-    const personaId = requestPersonaId || defaultPersonaId;
 
     if (!personaId) {
       throw new ExternalServiceError(
-        "TAVUS_PERSONA_ID is not configured",
+        "persona_id is required (set NEXT_PUBLIC_TAVUS_PERSONA_GENERIC or NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM in client env)",
         "tavus"
       );
     }

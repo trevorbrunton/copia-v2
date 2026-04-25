@@ -11,9 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Mic, PhoneOff } from "lucide-react";
 
 const PERSONA_OPTIONS = [
-  { id: "p9e3e1a0de0b", label: "Generic" },
-  { id: "p972eef6878f", label: "Custom" },
-] as const;
+  { id: process.env.NEXT_PUBLIC_TAVUS_PERSONA_GENERIC ?? "", label: "Generic" },
+  { id: process.env.NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM ?? "", label: "Custom" },
+].filter((p) => p.id);
 
 export function DemoPage() {
   const {
@@ -28,7 +28,7 @@ export function DemoPage() {
     handleVideoEnded,
   } = useDemo();
 
-  const [selectedPersona, setSelectedPersona] = useState<string>(PERSONA_OPTIONS[0].id);
+  const [selectedPersona, setSelectedPersona] = useState<string>(PERSONA_OPTIONS[0]?.id ?? "");
 
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] overflow-hidden">

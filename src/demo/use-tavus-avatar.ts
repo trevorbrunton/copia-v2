@@ -66,12 +66,16 @@ async function sendAudioEcho(
     if (signal.aborted) return;
     const chunk = audio.slice(offset, offset + AUDIO_ECHO_CHUNK_BASE64_CHARS);
     const isLast = offset + AUDIO_ECHO_CHUNK_BASE64_CHARS >= total;
-    // Schema verified against novacatai/novacat (working production
-    // implementation) and aws-samples/sample-voice-ai-tavus-avatar-demo:
-    // - `done` is a JSON boolean (NOT the string "true"/"false")
-    // - `conversation_id` belongs at the top level of the message
-    // - `sample_rate` is optional; Tavus uses the persona's configured
-    //   rate when absent. We pass it because the skill file shows it.
+    // Schema notes:
+    // - `conversation_id` at the top level matches both
+    //   novacatai/novacat and aws-samples/sample-voice-ai-tavus-
+    //   avatar-demo.
+    // - `done` is a STRING ("true"/"false") per Tavus's published
+    //   CVI Interactions skill file. We tried JSON boolean briefly
+    //   based on novacat (which uses Python bool that serialises to
+    //   JSON boolean) — Tavus went silent. The string form matches
+    //   the documented schema and was the only form that produced
+    //   audio playback.
     call.sendAppMessage(
       {
         message_type: "conversation",
@@ -82,7 +86,7 @@ async function sendAudioEcho(
           audio: chunk,
           sample_rate: sampleRate,
           inference_id: inferenceId,
-          done: isLast,
+          done: isLast ? "true" : "false",
         },
       },
       "*"
@@ -305,10 +309,15 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
           const data = evt?.data;
           if (!data) return;
           const eventType: string = data.event_type ?? data.type ?? "";
-          // Diagnostic: log every CVI event so the next time playback
-          // misbehaves, the actual event stream is in the console.
+          // Diagnostic: warn-level so Next dev forwards each line to
+          // the terminal as a [browser] log. Lets us see exactly what
+          // Tavus dispatches during a session without opening DevTools.
           if (eventType.startsWith("conversation.")) {
-            console.log("[tavus] event:", eventType, data?.properties ?? {});
+            console.warn(
+              "[tavus] event:",
+              eventType,
+              "inference_id=" + (data?.properties?.inference_id ?? data?.inference_id ?? "?")
+            );
           }
           const isSpeechEnd =
             eventType.includes("utterance_end") ||
@@ -466,11 +475,10 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         const convId = conversationIdRef.current;
         if (audioPayload) {
           currentInferenceIdRef.current = audioPayload.inferenceId;
-          console.log(
+          console.warn(
             "[tavus] Audio Echo:",
             audioPayload.audio.length,
-            "base64 chars,",
-            "inference_id=" + audioPayload.inferenceId,
+            "base64 chars, inference_id=" + audioPayload.inferenceId,
             "fallback=" + fallbackMs + "ms"
           );
           // Fire-and-forget — chunks pace themselves at ~80% audio
@@ -489,7 +497,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
               message_type: "conversation",
               event_type: "conversation.echo",
               ...(convId && { conversation_id: convId }),
-              properties: { modality: "text", text, done: true },
+              properties: { modality: "text", text, done: "true" },
             },
             "*"
           );

@@ -11,6 +11,7 @@ import {
   type FilterId,
   type FilterableSecurity,
 } from "@/src/screen/funnel";
+import { parseNumeric } from "@/src/screen/numeric";
 
 /**
  * POST /api/v1/screen/apply-filter
@@ -32,17 +33,6 @@ const BodySchema = z.object({
   filterId: z.string().refine(isFilterId, { message: "Invalid filterId" }),
   fromTickers: z.array(z.string()).optional(),
 });
-
-/**
- * Strict numeric coercion. Drizzle returns Postgres `numeric` columns
- * as strings; we parse to JS number. Returns null on null/undefined
- * input or any value that isn't a finite number — never NaN.
- */
-function parseNumeric(v: string | number | null): number | null {
-  if (v === null || v === undefined) return null;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 export async function POST(req: Request) {
   const traceId = crypto.randomUUID();

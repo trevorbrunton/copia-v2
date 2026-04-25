@@ -51,6 +51,10 @@ interface StocksTableProps {
   rows: SecurityDisplay[];
   defaultLimit?: number;
   className?: string;
+  /** Optional: click handler for the ticker cell. Phase 4 wires this to the StockFact panel. */
+  onTickerClick?: (ticker: string) => void;
+  /** Optional: highlight the currently-selected ticker. */
+  selectedTicker?: string | null;
 }
 
 const formatBn = (n: number | null) =>
@@ -59,7 +63,13 @@ const formatPct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFix
 const formatBnSigned = (n: number | null) =>
   n === null ? "—" : (n >= 0 ? "" : "−") + formatBn(Math.abs(n));
 
-export function StocksTable({ rows, defaultLimit = 50, className }: StocksTableProps) {
+export function StocksTable({
+  rows,
+  defaultLimit = 50,
+  className,
+  onTickerClick,
+  selectedTicker,
+}: StocksTableProps) {
   const [showAll, setShowAll] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -110,18 +120,36 @@ export function StocksTable({ rows, defaultLimit = 50, className }: StocksTableP
             </tr>
           </thead>
           <tbody>
-            {visible.map((r) => (
-              <tr key={r.ticker} className="border-b border-white/5 hover:bg-white/5">
-                <td className="px-3 py-2 font-mono text-xs text-white">{r.ticker}</td>
-                <td className="px-3 py-2 text-white/80 max-w-[18rem] truncate" title={r.companyName}>
-                  {r.companyName}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-white/80">{formatBn(r.marketCap)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-white/70">{formatPct(r.turnoverRatio)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-white/70">{formatBnSigned(r.netIncomeTtm)}</td>
-                <td className="px-3 py-2 text-white/60">{r.sector ?? r.gicsIndustryGroup ?? "—"}</td>
-              </tr>
-            ))}
+            {visible.map((r) => {
+              const isSelected = selectedTicker === r.ticker;
+              const tickerCell = onTickerClick ? (
+                <button
+                  onClick={() => onTickerClick(r.ticker)}
+                  className="text-white hover:text-amber-300 underline-offset-2 hover:underline"
+                >
+                  {r.ticker}
+                </button>
+              ) : (
+                r.ticker
+              );
+              return (
+                <tr
+                  key={r.ticker}
+                  className={`border-b border-white/5 ${
+                    isSelected ? "bg-amber-400/10" : "hover:bg-white/5"
+                  }`}
+                >
+                  <td className="px-3 py-2 font-mono text-xs">{tickerCell}</td>
+                  <td className="px-3 py-2 text-white/80 max-w-[18rem] truncate" title={r.companyName}>
+                    {r.companyName}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-white/80">{formatBn(r.marketCap)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-white/70">{formatPct(r.turnoverRatio)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-white/70">{formatBnSigned(r.netIncomeTtm)}</td>
+                  <td className="px-3 py-2 text-white/60">{r.sector ?? r.gicsIndustryGroup ?? "—"}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

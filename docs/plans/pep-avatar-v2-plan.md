@@ -12,7 +12,7 @@
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
-| 4. Stock-fact provider (snapshot-backed) | Not started | — |
+| 4. Stock-fact provider (snapshot-backed) | ✓ Complete | (this commit) |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |
 | 7. v1 code decommission | Not started | — |
@@ -451,16 +451,26 @@ The revised plan is only done when all of the following are true:
 
 **Exit criteria:** ✓ page is demoable with click and text input using snapshot data only; persona selector renders identically to v1.
 
-### Phase 4 - stock-fact provider (snapshot-backed)
+### Phase 4 - stock-fact provider (snapshot-backed) ✓ COMPLETE
 
-- add `MarketDataProvider` interface in `src/screen/market-data-provider.ts`
-- implement `SnapshotMarketDataProvider` reading the active snapshot
-- add the `<SourceBadge />` UI component
-- wire `info:stock_field` intent through the provider
+1. ✓ Extracted `parseNumeric` to `src/screen/numeric.ts` (shared between routes + provider). Tests caught the empty-string edge case (`Number("") === 0` → bug); fixed by checking `v.trim() === ""`.
+2. ✓ `src/screen/market-data-provider.ts`: `StockFact` type + `MarketDataProvider` interface + `SnapshotMarketDataProvider` class. Resolves the active snapshot via `MAX(collected_at)` (id tiebreaker), looks up the ticker, returns `{ ticker, companyName, sharePrice, marketCap, earningsStatus, fetchedAt, source, isLive: false }`. **No `LiveMarketDataProvider` committed** (D3, §6c).
+3. ✓ `POST /api/v1/screen/stock-fact` (inline route, no auth). Body `{ ticker }`, returns `{ fact: StockFact | null }` (200 even on miss). Uppercases + trims input. GET → 405.
+4. ✓ `<SourceBadge />` already shipped in phase 3; reused inside `<StockFactPanel />`.
+5. ✓ UI wiring: `components/screen/stock-fact-panel.tsx` opens below the stocks table when a ticker is clicked. `<StocksTable />` accepts `onTickerClick` + `selectedTicker` props. `key={selectedTicker}` on the panel re-mounts on re-selection so the panel stays stateless about which ticker is shown.
+6. ✓ Tests under `tests/screen/`:
+   - `numeric.test.ts` (4 cases) — strict parsing, finite-only, empty-string handling.
+   - `market-data-provider.test.ts` (6 cases) — known ticker, derived `Unprofitable (TTM)` for NXT, case-insensitive lookup, whitespace trim, unknown ticker → null, empty input → null. Skips gracefully if no `DATABASE_URL`.
+   - `routes.test.ts` (8 cases) — covers `GET /snapshot`, `POST /apply-filter` (incl. validation), `POST /stock-fact`. **Phase-3 follow-up satisfied.**
 
-Live-feed implementation is **explicitly deferred** (D3). No `LiveMarketDataProvider` stub is committed.
+**Smoke test:**
+- POST `{ticker: "CBA"}` → `{ sharePrice: 174.49, marketCap: 291.7B, earningsStatus: "Profitable (TTM)", source: "Snapshot 2026-04-24" }`.
+- POST `{ticker: "nxt"}` (lowercase) → ticker uppercased; `earningsStatus = "Unprofitable (TTM)"` (NXT's TTM net income is negative — pedagogically interesting for the demo).
+- POST `{ticker: "ZZZ"}` → 200 with `{ fact: null }`.
+- POST `{ticker: ""}` → 400. GET → 405.
+- **47/47 vitest tests** pass (was 29 before phase 4).
 
-**Exit criteria:** stock-fact answers (price / mcap / earnings status) for any shortlisted ticker resolve via the provider and render the source badge.
+**Exit criteria:** ✓ stock-fact answers resolve via the provider and render the source badge; clicking a row in the funnel shortlist opens a `StockFactPanel` with price / mcap / earnings status / snapshot date.
 
 ### Phase 5 - voice and routing
 

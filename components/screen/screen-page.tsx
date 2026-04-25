@@ -8,6 +8,7 @@ import { FunnelRail } from "./funnel-rail";
 import { StocksTable } from "./stocks-table";
 import { SourceBadge } from "./source-badge";
 import { StalenessBanner } from "./staleness-banner";
+import { StockFactPanel } from "./stock-fact-panel";
 import {
   METHODOLOGY_FILTERS,
   QUESTIONNAIRE_FILTERS,
@@ -24,6 +25,7 @@ export function ScreenPage() {
     PERSONA_OPTIONS[0]?.id ?? ""
   );
   const [preset, setPreset] = useState<Preset>("questionnaire");
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
   const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
 
@@ -164,7 +166,19 @@ export function ScreenPage() {
                   </span>
                 ) : null}
               </div>
-              <StocksTable rows={screener.currentRows} className="flex-1 min-h-0 flex flex-col" />
+              <StocksTable
+                rows={screener.currentRows}
+                onTickerClick={setSelectedTicker}
+                selectedTicker={selectedTicker}
+                className="flex-1 min-h-0 flex flex-col"
+              />
+              {selectedTicker ? (
+                <StockFactPanel
+                  key={selectedTicker}
+                  ticker={selectedTicker}
+                  onClose={() => setSelectedTicker(null)}
+                />
+              ) : null}
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-white/40">

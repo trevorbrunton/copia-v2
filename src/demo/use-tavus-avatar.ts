@@ -20,6 +20,9 @@ function endConversation(conversationId: string): void {
   }
 }
 
+const RECONNECT_FAILED_MSG = "Pep disconnected and reconnect failed.";
+const RECONNECTING_MSG = "Pep disconnected — reconnecting…";
+
 export type TavusAvatarStatus =
   | "idle"
   | "loading"
@@ -62,11 +65,58 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   const echoResolveRef = useRef<(() => void) | null>(null);
   // Timer for the echo() fallback timeout so unmount can clear it.
   const echoFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Persisted across reconnect attempts: the persona we last initialised
+  // with, and a one-shot guard so a flaky connection can't loop on
+  // creating new (billable) Tavus conversations.
+  const lastPersonaIdRef = useRef<string | undefined>(undefined);
+  const reconnectAttemptedRef = useRef(false);
+  const reconnectingRef = useRef(false);
+  // Forward-ref to initAvatar — populated in a useEffect below so the
+  // disconnect listeners (declared inside initAvatar) can call back into
+  // a fresh session without a circular closure.
+  const reinitRef = useRef<((personaId?: string) => Promise<boolean>) | null>(
+    null
+  );
+
+  /**
+   * One-shot reconnect attempt fired when an established Tavus session
+   * drops (replica leaves, local left-meeting after ready). Bills a new
+   * conversation, so guarded by `reconnectAttemptedRef` — a flaky
+   * connection only burns one extra session, not a loop.
+   */
+  const tryReconnect = useCallback((): void => {
+    if (reconnectingRef.current) return;
+    if (reconnectAttemptedRef.current) {
+      setStatus("error");
+      setError(RECONNECT_FAILED_MSG);
+      return;
+    }
+    reconnectAttemptedRef.current = true;
+    reconnectingRef.current = true;
+    setStatus("loading");
+    setError(RECONNECTING_MSG);
+
+    // Tear down lingering refs so initAvatar's guard clears.
+    resolvedRef.current = false;
+    initializingRef.current = false;
+    callRef.current = null;
+    conversationIdRef.current = null;
+
+    void (async () => {
+      const ok = (await reinitRef.current?.(lastPersonaIdRef.current)) ?? false;
+      reconnectingRef.current = false;
+      if (!ok) {
+        setStatus("error");
+        setError(RECONNECT_FAILED_MSG);
+      }
+    })();
+  }, []);
 
   const initAvatar = useCallback(async (personaId?: string): Promise<boolean> => {
     if (initializingRef.current || callRef.current) return false;
     initializingRef.current = true;
     resolvedRef.current = false;
+    lastPersonaIdRef.current = personaId;
     setStatus("loading");
     setError(null);
 
@@ -188,12 +238,25 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         });
 
         call.on("left-meeting", () => {
-          console.warn("[tavus] left-meeting — resolving false");
+          console.warn("[tavus] left-meeting");
           clearTimeout(timeout);
-          setStatus("idle");
           setMediaStream(null);
           callRef.current = null;
-          resolve(false);
+          if (resolvedRef.current) {
+            // We had a working session — try to reconnect once.
+            tryReconnect();
+          } else {
+            setStatus("idle");
+            resolve(false);
+          }
+        });
+
+        // The Tavus replica can leave the call if its session expires
+        // server-side. Treat as a disconnect and try to recover.
+        call.on("participant-left", (evt) => {
+          if (evt?.participant?.local) return;
+          console.warn("[tavus] participant-left (replica)");
+          if (resolvedRef.current) tryReconnect();
         });
 
         call.on("error", (evt) => {
@@ -223,7 +286,13 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
     } finally {
       initializingRef.current = false;
     }
-  }, []);
+  }, [tryReconnect]);
+
+  // Bridge for tryReconnect — assigning here avoids a circular closure
+  // with initAvatar's listener registration.
+  useEffect(() => {
+    reinitRef.current = initAvatar;
+  }, [initAvatar]);
 
   /**
    * Send text for the replica to speak verbatim with lip-sync (echo mode).

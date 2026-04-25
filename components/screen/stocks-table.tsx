@@ -6,13 +6,16 @@ import type { SecurityDisplay } from "@/src/screen/types";
 /**
  * Stocks table for the current funnel stage.
  *
- * - Renders up to `defaultLimit` rows (default 50). A "show all" toggle
- *   reveals the rest if there are more.
+ * - Renders up to `defaultLimit` rows (default 50). A "show more" toggle
+ *   reveals up to `MAX_ROWS` (500). Beyond that we keep the cap so the
+ *   pitch page never DOM-renders the full ~2k-row universe — even sorted
+ *   that's an 8k-cell table that hurts scroll perf and accessibility.
  * - Numeric columns right-aligned with tabular-nums; null values render
  *   as an em-dash so missing data is visible.
  * - Sortable by ticker / mcap / net income / turnover (click headers).
  *   Lightweight client-side sort — fine for v2's row counts.
  */
+const MAX_ROWS = 500;
 
 type SortKey = "ticker" | "marketCap" | "netIncomeTtm" | "turnoverRatio";
 type SortDir = "asc" | "desc";
@@ -85,7 +88,7 @@ export function StocksTable({
   }, [rows, sortKey, sortDir]);
 
   const visible = useMemo(
-    () => (showAll ? sorted : sorted.slice(0, defaultLimit)),
+    () => sorted.slice(0, showAll ? MAX_ROWS : defaultLimit),
     [sorted, showAll, defaultLimit]
   );
 
@@ -159,7 +162,9 @@ export function StocksTable({
           onClick={() => setShowAll(true)}
           className="border-t border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/5"
         >
-          Show all {rows.length.toLocaleString()} rows…
+          {rows.length > MAX_ROWS
+            ? `Show top ${MAX_ROWS.toLocaleString()} of ${rows.length.toLocaleString()} rows…`
+            : `Show all ${rows.length.toLocaleString()} rows…`}
         </button>
       ) : null}
     </div>

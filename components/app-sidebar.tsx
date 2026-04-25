@@ -3,7 +3,7 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { MessageSquare, LayoutDashboard, Settings, Cog } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Settings } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -19,9 +19,8 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 
 const navItems = [
-  { title: "Demo", url: "/demo", icon: MessageSquare },
+  { title: "Demo", url: "/demo/screen", icon: MessageSquare },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Config", url: "/config", icon: Cog },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
@@ -31,7 +30,7 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <Link href="/demo" className="flex items-center gap-2">
+        <Link href="/demo/screen" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
             C
           </div>

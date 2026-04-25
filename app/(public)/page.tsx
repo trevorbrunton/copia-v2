@@ -17,7 +17,7 @@ export default function LandingPage() {
         </p>
       </div>
       <Link
-        href="/demo"
+        href="/demo/screen"
         className="inline-flex items-center justify-center rounded-lg bg-[var(--oc-navy)] px-8 py-3 text-base font-medium text-white hover:bg-[var(--oc-dark)] transition-colors shadow-md"
       >
         Start Now

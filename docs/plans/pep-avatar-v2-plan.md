@@ -524,15 +524,24 @@ The revised plan is only done when all of the following are true:
 
 **Vercel deploy** is the last step before the meeting — env vars to set are listed in the plan §9; data is already populated in the shared Supabase. Final validation is the manual run-through against the deployed URL.
 
-### Phase 7 - v1 code decommission
+### Phase 7 - v1 code decommission ✓ COMPLETE
 
-Once v2 is end-to-end runnable and pitch-ready, remove v1 demo code from this repo. **Do not touch the v1 Supabase tables or their data** — the separate v1 app reads them.
+v2 is pitch-ready; v1 demo code has been removed from the repo. The v1 Supabase tables (`demo_responses`, `demo_question_patterns`) remain untouched — the separate v1 app continues to read them.
 
-- Delete: `app/demo/page.tsx`, `components/demo/demo-page.tsx`, `src/demo/use-demo.ts`, `src/demo/bedrock-matcher.ts`, `src/demo/classifier.ts`, `src/demo/config.ts`, `src/demo/types.ts`, `src/demo/index.ts`, `app/api/v1/demo/process/route.ts`, the qa admin (`app/api/v1/demo/qa/`, `app/(app)/config/page.tsx`, `components/config/qa-management.tsx`, `src/hooks/use-demo-qa.ts`, `src/services/demo-qa-service.ts`, `src/server/commands/demo/`, `src/server/queries/demo/`).
-- Keep: `app/api/v1/demo/tavus/*` (avatar runtime — reused by v2), `useTavusAvatar`, `useVoiceListener`, `avatar-panel.tsx`, `chat-panel.tsx`, `status-badge.tsx`, `error-banner.tsx`, the `persona-selector.tsx` lifted earlier.
-- Keep in `src/db/schema.ts`: `demoResponses` and `demoQuestionPatterns` orphan exports — leaving them in the schema file prevents drizzle-kit from generating `DROP TABLE` migrations against the shared Supabase database that the v1 app still depends on.
+- ✓ Deleted (per plan): `app/demo/page.tsx`, `components/demo/demo-page.tsx`, `src/demo/use-demo.ts`, `src/demo/bedrock-matcher.ts`, `src/demo/classifier.ts`, `src/demo/config.ts`, `src/demo/types.ts`, `src/demo/index.ts`, `app/api/v1/demo/process/route.ts`, the qa admin (`app/api/v1/demo/qa/`, `app/(app)/config/page.tsx`, `components/config/qa-management.tsx`, `src/hooks/use-demo-qa.ts`, `src/services/demo-qa-service.ts`, `src/server/commands/demo/`, `src/server/queries/demo/`).
+- ✓ Also deleted (orphans once `demo-page.tsx` was gone): `components/demo/avatar-panel.tsx`, `chat-panel.tsx`, `status-badge.tsx`, `error-banner.tsx`. Plan originally said "keep" but they had no remaining importers; deleted to honour CLAUDE.md's "no unused code" rule.
+- ✓ Kept: `app/api/v1/demo/tavus/*` (avatar runtime — reused by v2), `src/demo/use-tavus-avatar.ts`, `src/demo/use-voice-listener.ts`, `components/demo/persona-selector.tsx`.
+- ✓ Kept in `src/db/schema.ts`: `demoResponses` and `demoQuestionPatterns` orphan exports — prevents drizzle-kit from generating `DROP TABLE` migrations against the shared Supabase database that the v1 app still depends on.
+- ✓ Redirect targets updated: `proxy.ts` (auth-page redirect), `app/auth/callback/route.ts` (post-verify), `app/(public)/sign-in/page.tsx` (post-sign-in), `app/(public)/sign-up/page.tsx` (post-signup), `app/(public)/page.tsx` (landing CTA), `components/app-sidebar.tsx` (Demo nav item + brand link). All point to `/demo/screen` since `/demo` no longer exists. The "Config" sidebar item was removed.
+- ✓ Stale env vars: dropped `NEXT_PUBLIC_AVATAR_MODE` from `.env.example` (no remaining readers); removed the build-time `console.log` from `next.config.ts`.
 
-**Exit criteria:** repo contains v2 only at the code level; the v1 Supabase tables remain intact and queryable by the separate v1 app.
+**Exit criteria:** ✓ repo contains v2 only at the code level; the v1 Supabase tables remain intact and queryable by the separate v1 app.
+
+**Validation:**
+- `bunx tsc --noEmit` → clean.
+- `bun run lint` → 0 errors (1 pre-existing unrelated warning in `profile-tab.tsx`).
+- `bun run test` → 121/121 passing.
+- `/demo/screen` → 200; `/demo` and `/config` → 404; `/api/demo/process` and `/api/demo/qa` → 404; `/api/demo/tavus` → live (502 with structured error envelope on empty payload, as expected).
 
 ### Explicitly not in this scope
 

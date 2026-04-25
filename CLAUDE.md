@@ -54,12 +54,16 @@ app/
 │       ├── user/sessions/  # GET/POST/DELETE sessions, [id] revoke/heartbeat
 │       ├── user/devices/   # GET devices, [id] remove device
 │       ├── user/login-history/ # GET login history
-│       └── demo/              # Investor demo API (unauthenticated)
-│           ├── tavus/         # POST — Tavus CVI conversation (create)
-│           ├── tavus/[conversationId]/ # DELETE — End Tavus conversation (cleanup)
-│           ├── process/       # POST — Unified STT (ElevenLabs) + classification (Anthropic Haiku)
-│           └── qa/            # CRUD for demo Q&A pairs (admin, auth-protected)
-├── demo/               # Public investor demo page (no auth)
+│       ├── demo/              # Tavus avatar runtime (unauthenticated, used by /demo/screen)
+│       │   ├── tavus/         # POST — Tavus CVI conversation (create)
+│       │   └── tavus/[conversationId]/ # DELETE — End Tavus conversation (cleanup)
+│       └── screen/            # Pep screening demo API (unauthenticated)
+│           ├── snapshot/         # GET — current ASX snapshot rows
+│           ├── apply-filter/     # POST — run a single filter against a ticker set
+│           ├── stock-fact/       # POST — resolve ticker/name → snapshot field
+│           ├── portfolio-overlap/# POST — Q8 holdings overlap
+│           └── process/          # POST — STT (multipart) + intent classification
+├── demo/screen/        # Pep screening demo page (no auth)
 ├── layout.tsx          # Root layout with providers
 └── globals.css
 
@@ -79,13 +83,17 @@ components/
 ├── theme-toggle.tsx    # Dark/light toggle
 ├── providers.tsx       # QueryProvider + ThemeProvider
 ├── ui/                 # shadcn/ui components (incl. badge, breadcrumb)
-├── demo/               # Investor demo page components
-│   ├── demo-page.tsx   # Main layout (header + avatar + chat)
-│   ├── avatar-panel.tsx # Dual-layer video (idle loop + response overlay, no flicker)
-│   ├── chat-panel.tsx  # Message list with typing indicator
-│   ├── chat-input.tsx  # Text input + voice input (Web Speech API)
-│   ├── status-badge.tsx # Status indicator (ready/listening/thinking/speaking)
-│   └── error-banner.tsx # Dismissable error display
+├── demo/               # Shared demo widgets
+│   └── persona-selector.tsx # Tavus persona selector (Generic / Custom)
+├── screen/             # Pep screening demo components
+│   ├── screen-page.tsx       # Top-level layout (avatar + funnel rail + table + chat)
+│   ├── avatar-video.tsx      # Tavus video pane
+│   ├── conversation-pane.tsx # Pep transcript / chat
+│   ├── funnel-rail.tsx       # Stage visualisation
+│   ├── stocks-table.tsx      # Filtered universe table
+│   ├── stock-fact-panel.tsx  # Single-stock snapshot detail
+│   ├── source-badge.tsx      # "Snapshot of YYYY-MM-DD" badge
+│   └── staleness-banner.tsx  # Snapshot age warning
 └── settings/           # Settings tab components
     ├── profile-tab.tsx
     ├── security-tab.tsx
@@ -103,18 +111,25 @@ src/
 │   ├── validation.ts   # Zod schemas for auth & profile forms
 │   └── index.ts        # Public API exports
 ├── db/
-│   ├── index.ts        # Drizzle client (postgres-js)
-│   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory, demoResponses, demoQuestionPatterns
+│   ├── index.ts        # Drizzle client (postgres-js, bundles schema.ts + screen-schema.ts)
+│   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory + orphan demoResponses/demoQuestionPatterns (read by separate v1 app)
+│   ├── screen-schema.ts # asxSnapshots, asxSecurities, ocHoldings (Pep screening tables)
 │   └── migrations/     # SQL migrations
-├── demo/               # Investor demo module (OC Mid-Cap Fund)
-│   ├── config.ts       # Avatar mode flags (tavus | haiku), persona
-│   ├── types.ts        # ChatMessage, DemoStatus
-│   ├── classifier.ts   # Static PREGENERATED response map (30 categories with media URLs)
-│   ├── bedrock-matcher.ts # Anthropic Haiku question classifier (DB-backed, cached)
-│   ├── use-voice-listener.ts # Continuous VAD + PCM capture (AudioContext, configurable silence timeout)
-│   ├── use-tavus-avatar.ts # useTavusAvatar hook (Tavus CVI via Daily.co WebRTC)
-│   ├── use-demo.ts     # useDemo hook (VAD → process → playResponse)
-│   └── index.ts        # Public API exports
+├── demo/               # Avatar runtime shared with the screening demo
+│   ├── use-voice-listener.ts # Continuous VAD + PCM capture
+│   └── use-tavus-avatar.ts   # Tavus CVI via Daily.co WebRTC
+├── screen/             # Pep screening engine
+│   ├── funnel.ts             # Filter engine, FILTER_THRESHOLDS, presets
+│   ├── state.ts              # Client-side ScreenState reducer
+│   ├── load-snapshot.ts      # JSON merger (universe + ranked-light + top500 + curation)
+│   ├── numeric.ts            # Strict parseNumeric helper
+│   ├── market-data-provider.ts # SnapshotMarketDataProvider, StockFact
+│   ├── intent.ts / intent-rules.ts # Intent union + rule layer
+│   ├── entity-resolver.ts    # Ticker + bigram name resolution
+│   ├── screen-matcher.ts     # Rule-first → Anthropic classifier fallback
+│   ├── narration.ts          # Per-intent spoken-answer templates
+│   ├── stt.ts                # ElevenLabs scribe_v1 transcription
+│   └── use-screener.ts       # Client hook orchestrating the funnel
 ├── hooks/
 │   ├── use-user.ts     # User profile + delete account (with cache invalidation)
 │   ├── use-sessions.ts # Sessions, devices, login history (with optimistic updates)
@@ -219,19 +234,21 @@ Use `@/*` to import from the project root.
 - Session heartbeat every 15 minutes; session TTL 30 days
 - `sessionId` persisted in `localStorage` for survival across page refreshes
 
-### Investor Demo (OC Mid-Cap Fund)
-- Public page at `/demo` — no auth required (added to `PUBLIC_ROUTES` in `proxy.ts`)
-- Single pipeline: VAD → unified `POST /api/v1/demo/process` (ElevenLabs STT → Anthropic Haiku classifier) → DB responses
-- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"tavus"` | `"haiku"`
-  - **`tavus`**: continuous WebRTC stream via Daily.co with echo-based lip-sync (no visual cuts between responses)
-  - **`haiku`**: pre-recorded MP4s with idle loop underneath and response video on top (zero-flicker dual-layer)
-- Unauthenticated API routes under `/api/v1/demo/` (tavus, tavus/[id], process)
-- `useDemo()` hook orchestrates voice input, response matching, and avatar playback
+### Pep Screening Demo (OC Mid-Cap Fund)
+- Public page at `/demo/screen` — no auth required (the entire `/demo/*` tree is public)
+- Plan + decisions live in `docs/plans/pep-avatar-v2-plan.md`
+- Pipeline: VAD → multipart `POST /api/v1/screen/process` (ElevenLabs STT → rule-first matcher → Anthropic Haiku classifier fallback) → funnel mutation + Pep narration via Tavus echo
+- Avatar: continuous Tavus CVI WebRTC stream via Daily.co; every assistant narration is `tavusAvatar.echo()`-ed for lip-sync
+- Snapshot-backed only — no live ASX feed (D3). `MarketDataProvider` interface lives in `src/screen/market-data-provider.ts` for future swap
+- Tables: `asx_snapshots`, `asx_securities`, `oc_holdings` (see `src/db/screen-schema.ts`); ingest via `bun scripts/ingest-asx-snapshot.ts`
 - `useVoiceListener()` provides continuous voice capture with amplitude-based VAD (silence timeout configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`, default 1000ms)
-- `bedrock-matcher.ts` loads `demoResponses` + `demoQuestionPatterns` from DB (cached), sends to Anthropic Haiku for classification
 - Tavus conversation cleanup: `DELETE /api/v1/demo/tavus/[conversationId]` ends conversations server-side; also fires on component unmount
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
-- Env vars: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
+- Env vars: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `NEXT_PUBLIC_TAVUS_PERSONA_GENERIC`, `NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM`
+
+### v1 demo decommission (phase 7)
+- The v1 OC Mid-Cap demo (`/demo`, `app/api/v1/demo/process`, `app/api/v1/demo/qa`, `/config` admin) was removed in commit `<phase-7>` once v2 went pitch-ready
+- v1 Supabase tables (`demo_responses`, `demo_question_patterns`) are intentionally preserved — a separate v1 app still reads them. The orphan exports in `src/db/schema.ts` exist solely to prevent `drizzle-kit generate` from emitting `DROP TABLE` migrations against the shared DB
 
 ## Environment Variables
 

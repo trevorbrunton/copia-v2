@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Auth pages that now redirect straight to /demo (landing page "/" is excluded)
+// Auth pages that now redirect straight to the screening demo (landing page "/" is excluded)
 const AUTH_PAGES = ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify"];
 
 export default async function middleware(request: NextRequest) {
@@ -23,7 +23,7 @@ export default async function middleware(request: NextRequest) {
 
   if (isAuthPage) {
     const url = request.nextUrl.clone();
-    url.pathname = "/demo";
+    url.pathname = "/demo/screen";
     return NextResponse.redirect(url);
   }
 

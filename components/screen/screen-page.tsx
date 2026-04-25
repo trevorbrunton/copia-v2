@@ -27,6 +27,7 @@ import {
   describeFunnelComplete,
   describeInitialScreenStart,
   describeMonitoringEnabled,
+  describeOpening,
   describeOutputEmail,
   describeOutputShow,
   describePortfolioOverlap,
@@ -94,6 +95,23 @@ export function ScreenPage() {
     tavusReadyRef.current =
       tavusAvatar.status === "ready" || tavusAvatar.status === "speaking";
   }, [tavusAvatar.status]);
+
+  // One-shot opener: spoken when both the avatar reaches `ready` AND the
+  // snapshot has loaded, so the audience hears the cloned voice and a
+  // hint of what to ask. Guarded by a ref so an avatar reconnect mid-
+  // session doesn't replay the greeting.
+  const openingSpokenRef = useRef(false);
+  useEffect(() => {
+    if (openingSpokenRef.current) return;
+    if (tavusAvatar.status !== "ready") return;
+    if (!screener.snapshot) return;
+    openingSpokenRef.current = true;
+    const greeting = describeOpening();
+    appendTranscript("assistant", greeting);
+    tavusAvatar.echo(greeting).catch((err) => {
+      console.warn("[screen] tavus opening echo failed:", err);
+    });
+  }, [tavusAvatar, screener.snapshot, appendTranscript]);
 
   /**
    * Append an assistant line to the transcript AND have Pep speak it

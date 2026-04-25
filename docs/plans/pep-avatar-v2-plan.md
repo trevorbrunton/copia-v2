@@ -13,7 +13,7 @@
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
-| 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | (this commit) |
+| 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` |
 | 6. Polish and pitch hardening | Not started | — |
 | 7. v1 code decommission | Not started | — |
 

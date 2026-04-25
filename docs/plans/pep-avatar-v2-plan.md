@@ -10,8 +10,8 @@
 | Phase | Status | Commits |
 |---|---|---|
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
-| 2. Screening engine | ✓ Complete | (this commit) |
-| 3. UI and state | Not started | — |
+| 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
+| 3. UI and state | In progress | — |
 | 4. Stock-fact provider (snapshot-backed) | Not started | — |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |
@@ -423,9 +423,11 @@ The revised plan is only done when all of the following are true:
 - Bad filterId → 400 with VALIDATION_ERROR + traceId.
 - Missing body → 400. GET → 405.
 
-**Test totals:** 27/27 passing in 230ms.
+**Test totals:** 29/29 passing in 245ms (post-review).
 
 **Exit criteria:** ✓ snapshot-only screening works via the route without voice or avatar; both presets pass count tests.
+
+**Review fixes (commit `3c9cba4`):** four moderate, four minor — see §13.
 
 ### Phase 3 - UI and state
 
@@ -544,3 +546,18 @@ Code review of phase 1 surfaced two critical issues and four moderate ones; all 
 | Moderate | Magic thresholds (50_000_000, 0.20, 100) repeated | `FILTER_THRESHOLDS` named constants exported from `funnel.ts` |
 | Moderate | Stage IDs scattered as bare string literals across two functions and the fixture | `STAGE_IDS` const + `StageId` type + `STAGE_LABELS` map; one source of truth |
 | Moderate | Strict-true comparison on profitability filters drops null-enrichment rows undocumented | JSDoc on both presets explains the null-handling semantics |
+
+## 14. Review fixes applied during phase 2
+
+Code review of phase 2 surfaced four moderate and four minor issues; all closed in commit `3c9cba4`.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | Filter logic duplicated between `applyOneFilter` and inline `current.filter()` calls in the preset functions | Each preset is now a `FilterId[]` list reduced through `applyOneFilter`; that function is the single source of truth for every rule |
+| Moderate | `Stage` was missing the `appliedAt` field plan §4b requires for the funnel rail UI | Added to the `Stage` type; `makeStage` populates `new Date().toISOString()` with an explicit-override parameter for deterministic tests |
+| Moderate | Route used raw `Number(...)`, which would yield `NaN` on bad input and silently affect filter outcomes | Strict `parseNumeric()` returns null on `Number.isFinite(n) === false` |
+| Moderate | Snapshot resolution non-deterministic on `collected_at` ties | Added `desc(asxSnapshots.id)` as secondary order key |
+| Minor | Side-effecting `pushStage` helper | Replaced with pure `makeStage` |
+| Minor | Typos in `data/curation.json` silently did nothing | `loadSnapshot` warns to stderr when curated tickers aren't in the universe |
+| Minor | No test for empty `current.tickers` advancement, no `appliedAt` shape assertion | Two new tests; 29/29 passing |
+| Minor | `resetScreenState` duplicated `initScreenState` | Now delegates (one-line implementation) |

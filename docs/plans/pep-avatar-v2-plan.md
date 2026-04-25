@@ -11,7 +11,7 @@
 |---|---|---|
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
-| 3. UI and state | In progress | — |
+| 3. UI and state | ✓ Complete | (this commit) |
 | 4. Stock-fact provider (snapshot-backed) | Not started | — |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |
@@ -429,14 +429,27 @@ The revised plan is only done when all of the following are true:
 
 **Review fixes (commit `3c9cba4`):** four moderate, four minor — see §13.
 
-### Phase 3 - UI and state
+### Phase 3 - UI and state ✓ COMPLETE
 
-1. **Lift** the existing `PERSONA_OPTIONS` constant + radio group from `components/demo/demo-page.tsx` into a shared `components/demo/persona-selector.tsx`. Update v1's `demo-page.tsx` to import from the new location so v1 keeps working.
-2. Build `app/demo/screen/page.tsx` and `components/screen/{screen-page,funnel-rail,stocks-table,source-badge,staleness-banner}.tsx`.
-3. Wire `useScreener` hook with `ScreenState`.
-4. Mount at `/demo/screen`.
+1. ✓ Lifted `PERSONA_OPTIONS` + radio group into `components/demo/persona-selector.tsx`. v1's `demo-page.tsx` now imports from the new location and renders identically.
+2. ✓ Added `GET /api/v1/screen/snapshot` (inline route) — returns active snapshot meta + every security's display fields. Bootstrap endpoint for the v2 client.
+3. ✓ Built `src/screen/use-screener.ts`: `start` (loads snapshot, seeds universe stage), `applyFilter` (calls `/apply-filter`, appends stage), `reset`. In-flight guard against StrictMode double-fires. `currentRows` derived via `Map<ticker, SecurityDisplay>` lookup.
+4. ✓ Added `src/screen/types.ts`: `SecurityDisplay`, `SnapshotMeta`, `SnapshotResponse`, `ApplyFilterResponse`.
+5. ✓ Built UI components under `components/screen/`:
+   - `source-badge.tsx` — `Snapshot {{date}}` badge per §6d, structured for a future `Live` variant.
+   - `staleness-banner.tsx` — yellow ≥ 8d, red > 30d per §8a.
+   - `funnel-rail.tsx` — completed stages as filled checks with count + drop delta; pending stages as hollow dots.
+   - `stocks-table.tsx` — sortable (ticker / mcap / turnover / net income), virtualised-by-default at 50 rows with "show all" toggle, em-dash on null fields.
+   - `screen-page.tsx` — full layout: header, source badge, staleness banner, error banner, left rail (avatar placeholder + persona selector + preset toggle + funnel + Next/Reset buttons), right pane (stocks table + data-quality footnote), no avatar yet (phase 5).
+6. ✓ Mounted at `app/demo/screen/page.tsx`.
 
-**Exit criteria:** page is demoable with click and text input using snapshot data only; persona selector renders identically to v1.
+**Smoke test:**
+- `GET /demo` (v1): 200 in 24ms, persona selector renders identically.
+- `GET /demo/screen` (v2): 200 in 161ms cold.
+- `GET /api/v1/screen/snapshot`: 200 in 553ms, returns 1,979 securities + snapshot meta.
+- 29/29 vitest tests still pass.
+
+**Exit criteria:** ✓ page is demoable with click and text input using snapshot data only; persona selector renders identically to v1.
 
 ### Phase 4 - stock-fact provider (snapshot-backed)
 

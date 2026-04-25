@@ -7,13 +7,9 @@ import { AvatarPanel } from "./avatar-panel";
 import { ChatPanel } from "./chat-panel";
 import { StatusBadge } from "./status-badge";
 import { ErrorBanner } from "./error-banner";
+import { PERSONA_OPTIONS, PersonaSelector } from "./persona-selector";
 import { Button } from "@/components/ui/button";
 import { Mic, PhoneOff } from "lucide-react";
-
-const PERSONA_OPTIONS = [
-  { id: process.env.NEXT_PUBLIC_TAVUS_PERSONA_GENERIC ?? "", label: "Generic" },
-  { id: process.env.NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM ?? "", label: "Custom" },
-].filter((p) => p.id);
 
 export function DemoPage() {
   const {
@@ -71,24 +67,10 @@ export function DemoPage() {
             ) : (
               <div className="flex flex-col items-center gap-3">
                 {USE_TAVUS_AVATAR && (
-                  <div className="flex items-center gap-4">
-                    {PERSONA_OPTIONS.map((p) => (
-                      <label
-                        key={p.id}
-                        className="flex items-center gap-1.5 cursor-pointer text-xs text-white/70 hover:text-white/90"
-                      >
-                        <input
-                          type="radio"
-                          name="persona"
-                          value={p.id}
-                          checked={selectedPersona === p.id}
-                          onChange={() => setSelectedPersona(p.id)}
-                          className="accent-white"
-                        />
-                        {p.label}
-                      </label>
-                    ))}
-                  </div>
+                  <PersonaSelector
+                    selectedId={selectedPersona}
+                    onChange={setSelectedPersona}
+                  />
                 )}
                 <Button
                   onClick={() =>

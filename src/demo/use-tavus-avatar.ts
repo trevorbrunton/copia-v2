@@ -331,11 +331,15 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
       try {
         setStatus("speaking");
+        // Schema per Tavus Interactions Protocol → Echo Interaction.
+        // The persona must be `pipeline_mode: "echo"` for this to be the
+        // ONLY voice path; otherwise the persona's LLM speaks in parallel
+        // (the "two voices" failure mode). See docs/TAVUS-PERSONA-SETUP.md.
         call.sendAppMessage(
           {
             message_type: "conversation",
             event_type: "conversation.echo",
-            properties: { modality: "text", text },
+            properties: { text },
           },
           "*"
         );

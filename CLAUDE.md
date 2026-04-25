@@ -238,7 +238,7 @@ Use `@/*` to import from the project root.
 - Public page at `/demo/screen` — no auth required (the entire `/demo/*` tree is public)
 - Plan + decisions live in `docs/plans/pep-avatar-v2-plan.md`
 - Pipeline: VAD → multipart `POST /api/v1/screen/process` (ElevenLabs STT → rule-first matcher → Anthropic Haiku classifier fallback) → funnel mutation + Pep narration via Tavus echo
-- Avatar: continuous Tavus CVI WebRTC stream via Daily.co; every assistant narration is `tavusAvatar.echo()`-ed for lip-sync
+- Avatar: continuous Tavus CVI WebRTC stream via Daily.co; every assistant narration is `tavusAvatar.echo()`-ed for lip-sync. **The persona must be `pipeline_mode: "echo"`** or you get two parallel voices — see `docs/TAVUS-PERSONA-SETUP.md` for the create/verify steps and `bun scripts/create-tavus-echo-persona.ts` to spin one up
 - Snapshot-backed only — no live ASX feed (D3). `MarketDataProvider` interface lives in `src/screen/market-data-provider.ts` for future swap
 - Tables: `asx_snapshots`, `asx_securities`, `oc_holdings` (see `src/db/screen-schema.ts`); ingest via `bun scripts/ingest-asx-snapshot.ts`
 - `useVoiceListener()` provides continuous voice capture with amplitude-based VAD (silence timeout configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`, default 1000ms)

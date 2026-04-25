@@ -42,13 +42,25 @@ interface AudioEchoPayload {
  * chunks share the same `inference_id`; the final chunk carries
  * `done: "true"` per the Tavus Interactions Protocol. Schema verified
  * against Tavus-Engineering/tavus-skills (CVI Interactions skill).
+ *
+ * **Chunks are paced** at ~80% of audio playback rate. Bursting all
+ * chunks into Daily's data channel synchronously stuttered playback
+ * AND suppressed Tavus's `stopped_speaking` event — pacing fixes both.
+ * 80% leaves a small buffer ahead of the replica's playhead so we
+ * don't underrun.
  */
-function sendAudioEcho(
+async function sendAudioEcho(
   call: DailyCall,
-  { audio, sampleRate, inferenceId }: AudioEchoPayload
-): void {
+  { audio, sampleRate, inferenceId }: AudioEchoPayload,
+  signal: AbortSignal
+): Promise<void> {
   const total = audio.length;
+  const rawBytesPerChunk = Math.floor(AUDIO_ECHO_CHUNK_BASE64_CHARS * 0.75);
+  const chunkAudioMs = (rawBytesPerChunk / 2 / sampleRate) * 1000;
+  const interChunkDelayMs = Math.max(40, Math.floor(chunkAudioMs * 0.8));
+
   for (let offset = 0; offset < total; offset += AUDIO_ECHO_CHUNK_BASE64_CHARS) {
+    if (signal.aborted) return;
     const chunk = audio.slice(offset, offset + AUDIO_ECHO_CHUNK_BASE64_CHARS);
     const isLast = offset + AUDIO_ECHO_CHUNK_BASE64_CHARS >= total;
     call.sendAppMessage(
@@ -66,7 +78,15 @@ function sendAudioEcho(
       },
       "*"
     );
+    if (!isLast) {
+      await new Promise<void>((resolve) => setTimeout(resolve, interChunkDelayMs));
+    }
   }
+}
+
+/** Audio duration in ms for a base64 PCM 16-bit mono payload. */
+function estimateAudioMs(base64Length: number, sampleRate: number): number {
+  return Math.ceil((base64Length * 0.75) / 2 / sampleRate * 1000);
 }
 
 export type TavusAvatarStatus =
@@ -400,12 +420,18 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
     }
 
     return new Promise<void>((resolve) => {
-      // Fallback timer — mirrors the prior behaviour: ~55ms/char + 1s.
-      // Still useful as a safety net when the stopped_speaking event
-      // doesn't arrive (network blip, replica drop).
-      const fallbackMs = Math.max(3000, text.length * 55 + 1000);
+      const audioAbort = new AbortController();
+
+      // Fallback budget. For Audio Echo we know the actual audio
+      // duration (PCM bytes / 2 / sample_rate); allow audio length +
+      // 2.5s for the stopped_speaking event to make it back. Text echo
+      // keeps the legacy ~55ms/char heuristic.
+      const fallbackMs = audioPayload
+        ? estimateAudioMs(audioPayload.audio.length, audioPayload.sampleRate) + 2500
+        : Math.max(3000, text.length * 55 + 1000);
       const fallback = setTimeout(() => {
         console.warn("[tavus] echo fallback timeout fired after", fallbackMs, "ms");
+        audioAbort.abort();
         echoFallbackRef.current = null;
         currentInferenceIdRef.current = null;
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));
@@ -416,6 +442,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
       echoResolveRef.current = () => {
         clearTimeout(fallback);
+        audioAbort.abort();
         echoFallbackRef.current = null;
         resolve();
       };
@@ -424,7 +451,12 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         setStatus("speaking");
         if (audioPayload) {
           currentInferenceIdRef.current = audioPayload.inferenceId;
-          sendAudioEcho(call, audioPayload);
+          // Fire-and-forget — chunks pace themselves at ~80% audio
+          // rate. Errors are non-fatal: even partial delivery may
+          // produce some speech, and the fallback covers full silence.
+          void sendAudioEcho(call, audioPayload, audioAbort.signal).catch((err) => {
+            console.warn("[tavus] sendAudioEcho failed mid-stream:", err);
+          });
         } else {
           currentInferenceIdRef.current = null;
           // Schema per Tavus Interactions Protocol → Echo Interaction.
@@ -441,6 +473,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         }
       } catch (err) {
         clearTimeout(fallback);
+        audioAbort.abort();
         echoFallbackRef.current = null;
         echoResolveRef.current = null;
         currentInferenceIdRef.current = null;

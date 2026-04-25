@@ -43,6 +43,8 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   const resolvedRef = useRef(false);
   // Resolve function for the current echo() call — set when speaking, cleared on speech end.
   const echoResolveRef = useRef<(() => void) | null>(null);
+  // Timer for the echo() fallback timeout so unmount can clear it.
+  const echoFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const initAvatar = useCallback(async (personaId?: string): Promise<boolean> => {
     if (initializingRef.current || callRef.current) return false;
@@ -104,12 +106,6 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
             if (id === "local") continue;
             const videoTrack = p.tracks?.video?.persistentTrack;
             const audioTrack = p.tracks?.audio?.persistentTrack;
-            console.log("[tavus] tryExtractStream participant:", id, {
-              videoState: p.tracks?.video?.state,
-              audioState: p.tracks?.audio?.state,
-              hasVideoTrack: !!videoTrack,
-              hasAudioTrack: !!audioTrack,
-            });
             if (videoTrack) {
               const stream = new MediaStream();
               stream.addTrack(videoTrack);
@@ -127,11 +123,6 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         };
 
         const handleTrackStarted = (event: DailyEventObjectTrack) => {
-          console.log("[tavus] track-started:", {
-            kind: event.track?.kind,
-            isLocal: event.participant?.local,
-            participantId: event.participant?.session_id,
-          });
           if (!event.participant || event.participant.local) return;
           // Try on any track, not just video — audio arriving means the replica is live
           tryExtractStream();
@@ -139,11 +130,9 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
         const handleParticipantUpdated = (event: DailyEventObjectParticipant) => {
           if (!event.participant || event.participant.local) return;
-          console.log("[tavus] participant-updated:", {
-            id: event.participant.session_id,
-            videoState: event.participant.tracks?.video?.state,
-            audioState: event.participant.tracks?.audio?.state,
-          });
+          // No log here: Daily fires this per audio-level update (many times per
+          // second) and devtools cannot keep up — the tab freezes.
+          if (resolvedRef.current) return;
           tryExtractStream();
         };
 
@@ -165,8 +154,6 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         call.on("app-message", (evt) => {
           const data = evt?.data;
           if (!data) return;
-          console.log("[tavus] app-message:", data);
-
           const eventType: string = data.event_type ?? data.type ?? "";
           if (
             eventType.includes("utterance_end") ||
@@ -242,14 +229,17 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
       const fallbackMs = Math.max(3000, text.length * 55 + 1000);
       const fallback = setTimeout(() => {
         console.warn("[tavus] echo fallback timeout fired after", fallbackMs, "ms");
+        echoFallbackRef.current = null;
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));
         echoResolveRef.current = null;
         resolve();
       }, fallbackMs);
+      echoFallbackRef.current = fallback;
 
       // Store resolve so the app-message listener can call it
       echoResolveRef.current = () => {
         clearTimeout(fallback);
+        echoFallbackRef.current = null;
         resolve();
       };
 
@@ -265,6 +255,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         );
       } catch (err) {
         clearTimeout(fallback);
+        echoFallbackRef.current = null;
         echoResolveRef.current = null;
         const msg = err instanceof Error ? err.message : "Echo failed";
         setError(msg);
@@ -294,6 +285,12 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   }, []);
 
   const stopAvatar = useCallback(async () => {
+    if (echoFallbackRef.current) {
+      clearTimeout(echoFallbackRef.current);
+      echoFallbackRef.current = null;
+    }
+    echoResolveRef.current = null;
+
     const call = callRef.current;
     if (!call) return;
 
@@ -322,6 +319,11 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (echoFallbackRef.current) {
+        clearTimeout(echoFallbackRef.current);
+        echoFallbackRef.current = null;
+      }
+      echoResolveRef.current = null;
       const call = callRef.current;
       if (call) {
         call.leave().catch(() => {});

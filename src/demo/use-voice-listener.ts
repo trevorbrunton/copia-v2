@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Continuous voice listener with amplitude-based Voice Activity Detection.
@@ -57,7 +57,9 @@ export function useVoiceListener({
   const pausedRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const onUtteranceRef = useRef(onUtterance);
-  onUtteranceRef.current = onUtterance;
+  useEffect(() => {
+    onUtteranceRef.current = onUtterance;
+  }, [onUtterance]);
 
   /** Flush the current speech buffer and fire onUtterance. */
   const flushUtterance = useCallback(() => {
@@ -82,7 +84,7 @@ export function useVoiceListener({
     chunksRef.current = [];
 
     onUtteranceRef.current(combined.buffer, sampleRateRef.current);
-  }, []);
+  }, [minSpeechDurationMs]);
 
   /** Open mic and start continuous listening with VAD. */
   const start = useCallback(async () => {
@@ -160,7 +162,7 @@ export function useVoiceListener({
     processorRef.current = processor;
     pausedRef.current = false;
     setIsListening(true);
-  }, [flushUtterance]);
+  }, [flushUtterance, silenceTimeoutMs, speechThreshold]);
 
   /** Temporarily pause listening (e.g. during response playback). */
   const pause = useCallback(() => {

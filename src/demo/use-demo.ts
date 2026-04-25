@@ -289,9 +289,18 @@ export function useDemo() {
         const res = await fetch(pcmUrl);
         if (!res.ok) throw new Error(`Failed to fetch PCM: ${res.status}`);
         const buffer = await res.arrayBuffer();
-        base64 = btoa(
-          new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), "")
-        );
+        // Chunked binary-string build avoids the O(n^2) `reduce` and the
+        // call-stack limit of `String.fromCharCode(...bytes)` for large buffers.
+        const bytes = new Uint8Array(buffer);
+        const CHUNK = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode.apply(
+            null,
+            bytes.subarray(i, i + CHUNK) as unknown as number[]
+          );
+        }
+        base64 = btoa(binary);
         pcmCacheRef.current[pcmUrl] = base64;
       }
       // speakAudio returns a promise that resolves on agent.speak_ended

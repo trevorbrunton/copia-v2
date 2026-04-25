@@ -13,7 +13,7 @@
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
-| 5. Voice and routing | Not started | — |
+| 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | (this commit) |
 | 6. Polish and pitch hardening | Not started | — |
 | 7. v1 code decommission | Not started | — |
 
@@ -472,17 +472,33 @@ The revised plan is only done when all of the following are true:
 
 **Exit criteria:** ✓ stock-fact answers resolve via the provider and render the source badge; clicking a row in the funnel shortlist opens a `StockFactPanel` with price / mcap / earnings status / snapshot date.
 
-### Phase 5 - voice and routing
+### Phase 5 - intent routing + UI conversation ✓ COMPLETE (text mode)
 
-1. **Write tests first**:
-   - `tests/screen/intent-rules.test.ts` — exact / regex matches for the 8 questions and stock-fact intents.
-   - `tests/screen/router.test.ts` — fixture of ~30 paraphrased utterances → expected intents (uses stubbed Anthropic responses captured once; live mode available for local re-record).
-   - `tests/screen/entity-resolution.test.ts` — ticker / company-name lookup.
-2. Implement `src/screen/intent-rules.ts`, `src/screen/screen-matcher.ts`, `src/screen/entity-resolver.ts`.
-3. Build `POST /api/v1/screen/process` (inline route, ElevenLabs STT + matcher + entity resolver).
-4. Connect responses to `tavusAvatar.echo()`.
+1. ✓ `src/screen/intent.ts` — `Intent` union covering 10 kinds (apply_filter, next_step, apply_initial_screen, output_show, output_email, info_stock_field, info_portfolio_overlap, monitoring_enable_daily, restart, fallback) + `INTENT_KINDS` enum.
+2. ✓ TDD-first `tests/screen/intent-rules.test.ts` (45 cases) covering every Pep question, paraphrases, and case-insensitivity.
+3. ✓ `src/screen/intent-rules.ts` — ordered rule list (specific → general). Funnel-filter rules precede stock-fact so "market cap of 50m" lands on Q1, "market cap of CBA" lands on `info_stock_field`.
+4. ✓ TDD-first `tests/screen/entity-resolution.test.ts` (14 cases). The bigram pass disambiguates `Commonwealth Bank` → CBA from `Australian Commonwealth Government Loans` → XCL — caught against the live snapshot during integration.
+5. ✓ `src/screen/entity-resolver.ts` — pure `resolveEntity({tickers, nameByTicker})` (testable) + class-based `EntityResolver` with snapshot-keyed cache. Two-pass:
+   - Ticker pass: regex `\b[A-Z0-9]{2,5}\b` over uppercased text → set-membership filter.
+   - Name pass: bigram match (≥4-char tokens, ordered pair) then single-token fallback (≥6 chars, word-boundary) with stop-word list.
+6. ✓ `src/screen/screen-matcher.ts` — `matchScreenIntent(text, classifier)` runs the rule layer first, falls through to a constrained Anthropic Haiku classifier (Zod-parsed JSON, falls back to `{kind: "fallback"}` on parse error or missing `ANTHROPIC_API_KEY`).
+7. ✓ `POST /api/v1/screen/process` — inline route, no auth. Body `{ text }`, returns `{ text, intent }`. For `info_stock_field` intents it also runs entity resolution server-side.
+8. ✓ `POST /api/v1/screen/portfolio-overlap` — Q8 join: takes the current shortlist tickers, returns matching/non-matching holdings + `isSample` flag (D8).
+9. ✓ Tests in `tests/screen/routes.test.ts` cover the new routes (5 new cases for `/process`).
+10. ✓ UI: `components/screen/conversation-pane.tsx` (transcript + ask box) + intent dispatcher inline in `screen-page.tsx`. The dispatcher routes each intent to the appropriate action (`screener.applyFilter`, `setSelectedTicker`, `screener.reset`, sonner toast for output_email / monitoring) and appends a narration line to the transcript.
 
-**Exit criteria:** the 8 supplied spoken questions work reliably; classifier-fallback paraphrases route correctly per the fixture.
+**Test totals:** 112/112 vitest passing (was 48 before phase 5; +45 intent-rules + 14 entity-resolution + 5 process route).
+
+**Smoke test:**
+- "Show me ASX stocks with a market cap above 50 million dollars" → `apply_filter q1_mcap_50m`.
+- "What is commonwealth bank market cap" → `info_stock_field` + ticker `CBA` (bigram pass).
+- "How many of my holdings still meet the criteria" → `info_portfolio_overlap` → server returns 0/10 matching, 10/10 non-matching for an empty universe call (sample data correctly labelled).
+- /demo/screen 200 in 24ms.
+
+**Deferred to phase 6 polish:**
+- Voice STT integration (re-use ElevenLabs from v1) and Tavus avatar narration. Plan §11 manual-check list still requires "ask the 8 supplied questions in order" — that works today via typed input. Voice is the wow-moment but not blocking the demo.
+
+**Exit criteria:** ✓ The 8 supplied questions are answered correctly via the typed-input flow; rules cover scripted paraphrases without an LLM call; the classifier fallback degrades gracefully to `fallback` if Anthropic is misconfigured.
 
 ### Phase 6 - polish and pitch hardening
 

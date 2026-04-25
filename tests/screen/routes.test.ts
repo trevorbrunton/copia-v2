@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { GET as snapshotGET } from "@/app/api/v1/screen/snapshot/route";
 import { POST as applyFilterPOST } from "@/app/api/v1/screen/apply-filter/route";
 import { POST as stockFactPOST } from "@/app/api/v1/screen/stock-fact/route";
+import { POST as processPOST } from "@/app/api/v1/screen/process/route";
 
 const SHOULD_RUN = !!process.env.DATABASE_URL;
 
@@ -104,5 +105,54 @@ describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/stock-fact", () => {
   it("rejects empty/missing ticker with 400", async () => {
     expect((await stockFactPOST(jsonRequest({ ticker: "" }))).status).toBe(400);
     expect((await stockFactPOST(jsonRequest({}))).status).toBe(400);
+  });
+});
+
+describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/process", () => {
+  it("classifies a Q1 utterance via the rule layer", async () => {
+    const res = await processPOST(
+      jsonRequest({ text: "Show me ASX stocks with a market cap of more than 50 million dollars" })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      text: string;
+      intent: { kind: string; filterId?: string };
+    };
+    expect(body.intent.kind).toBe("apply_filter");
+    expect(body.intent.filterId).toBe("q1_mcap_50m");
+  });
+
+  it("classifies and resolves a stock-fact query end-to-end", async () => {
+    const res = await processPOST(jsonRequest({ text: "What's BHP's market cap?" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      text: string;
+      intent: { kind: string; ticker?: string; field?: string };
+    };
+    expect(body.intent.kind).toBe("info_stock_field");
+    expect(body.intent.ticker).toBe("BHP");
+    expect(body.intent.field).toBe("market_cap");
+  });
+
+  it("resolves a company-name fallback (Commonwealth Bank → CBA)", async () => {
+    const res = await processPOST(
+      jsonRequest({ text: "what's commonwealth bank's market cap" })
+    );
+    const body = (await res.json()) as {
+      intent: { kind: string; ticker?: string };
+    };
+    expect(body.intent.kind).toBe("info_stock_field");
+    expect(body.intent.ticker).toBe("CBA");
+  });
+
+  it("classifies the OC initial-screen shortcut", async () => {
+    const res = await processPOST(jsonRequest({ text: "Run the OC initial screen" }));
+    const body = (await res.json()) as { intent: { kind: string } };
+    expect(body.intent.kind).toBe("apply_initial_screen");
+  });
+
+  it("rejects empty/missing text with 400", async () => {
+    expect((await processPOST(jsonRequest({ text: "" }))).status).toBe(400);
+    expect((await processPOST(jsonRequest({}))).status).toBe(400);
   });
 });

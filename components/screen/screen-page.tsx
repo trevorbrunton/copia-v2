@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Play, RotateCcw } from "lucide-react";
 import { PersonaSelector, PERSONA_OPTIONS } from "@/components/demo/persona-selector";
@@ -9,12 +10,15 @@ import { StocksTable } from "./stocks-table";
 import { SourceBadge } from "./source-badge";
 import { StalenessBanner } from "./staleness-banner";
 import { StockFactPanel } from "./stock-fact-panel";
+import { ConversationPane, type TranscriptEntry } from "./conversation-pane";
 import {
   METHODOLOGY_FILTERS,
   QUESTIONNAIRE_FILTERS,
   STAGE_LABELS,
+  type FilterId,
   type StageId,
 } from "@/src/screen/funnel";
+import type { Intent } from "@/src/screen/intent";
 import { useScreener } from "@/src/screen/use-screener";
 
 type Preset = "questionnaire" | "methodology";
@@ -26,6 +30,8 @@ export function ScreenPage() {
   );
   const [preset, setPreset] = useState<Preset>("questionnaire");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
 
   // Escape closes the StockFactPanel.
   useEffect(() => {
@@ -39,10 +45,9 @@ export function ScreenPage() {
 
   const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
 
-  // Position within the active preset: which filter would `Next` apply?
   const completedStageIds: StageId[] = screener.stages.map((s) => s.id);
   const nextIdx = sequence.findIndex((f) => !completedStageIds.includes(f));
-  const nextFilter = nextIdx >= 0 ? sequence[nextIdx] : null;
+  const nextFilter: FilterId | null = nextIdx >= 0 ? sequence[nextIdx] : null;
 
   const pending = useMemo(
     () =>
@@ -62,6 +67,180 @@ export function ScreenPage() {
     [screener.currentRows]
   );
 
+  const appendTranscript = useCallback((role: "user" | "assistant", text: string) => {
+    setTranscript((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role, text },
+    ]);
+  }, []);
+
+  // Run the entire methodology preset in sequence so the rail animates
+  // through every stage (each call is one round trip — fine for v2).
+  const runInitialScreen = useCallback(async () => {
+    for (const f of METHODOLOGY_FILTERS) {
+      // Skip ones that are already in the stages list (e.g. universe is always there).
+      if (screener.stages.some((s) => s.id === f)) continue;
+      await screener.applyFilter(f);
+    }
+  }, [screener]);
+
+  /** Convert an Intent into a UI action + a narration line. */
+  const handleIntent = useCallback(
+    async (text: string, intent: Intent) => {
+      switch (intent.kind) {
+        case "next_step": {
+          if (nextFilter) {
+            await screener.applyFilter(nextFilter);
+            appendTranscript("assistant", `Applied ${STAGE_LABELS[nextFilter]}.`);
+          } else {
+            appendTranscript("assistant", "The funnel is already complete. Try Reset to start over.");
+          }
+          break;
+        }
+        case "apply_filter": {
+          await screener.applyFilter(intent.filterId);
+          appendTranscript(
+            "assistant",
+            `Applied ${STAGE_LABELS[intent.filterId]}.`
+          );
+          break;
+        }
+        case "apply_initial_screen": {
+          // Switch to methodology preset visually.
+          if (preset !== "methodology") setPreset("methodology");
+          appendTranscript(
+            "assistant",
+            "Running the OC initial screen — applying market cap > $50m, profitable, cash-flow positive, exclusions, liquidity, and ASX-100 cut."
+          );
+          await runInitialScreen();
+          break;
+        }
+        case "output_show": {
+          appendTranscript(
+            "assistant",
+            `Showing the ${screener.currentRows.length.toLocaleString()} stocks in the current stage in the table on the right.`
+          );
+          break;
+        }
+        case "output_email": {
+          toast.success("Email queued — check your inbox.", {
+            description: "(Demo workflow — no email is actually sent.)",
+          });
+          appendTranscript(
+            "assistant",
+            "I've queued an email of the current list to your inbox. (This is a demo workflow — no email is actually sent.)"
+          );
+          break;
+        }
+        case "info_stock_field": {
+          if (intent.ticker) {
+            setSelectedTicker(intent.ticker);
+            appendTranscript(
+              "assistant",
+              `Pulling ${intent.field?.replace(/_/g, " ") ?? "details"} for ${intent.ticker} — see the panel below.`
+            );
+          } else {
+            appendTranscript(
+              "assistant",
+              "I couldn't pin down which company you meant. Try a ticker like BHP or a more specific company name."
+            );
+          }
+          break;
+        }
+        case "info_portfolio_overlap": {
+          const current = screener.stages.at(-1);
+          if (!current) {
+            appendTranscript("assistant", "Run the screen first, then ask about portfolio overlap.");
+            break;
+          }
+          try {
+            const res = await fetch("/api/v1/screen/portfolio-overlap", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fromTickers: current.tickers }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = (await res.json()) as {
+              isSample: boolean;
+              matching: Array<{ ticker: string }>;
+              nonMatching: Array<{ ticker: string }>;
+              totalHoldings: number;
+            };
+            const sampleNote = data.isSample ? " (based on the sample portfolio)" : "";
+            appendTranscript(
+              "assistant",
+              `${data.matching.length} of your ${data.totalHoldings} top holdings still meet the screen${sampleNote}. The ${data.nonMatching.length} that don't: ${data.nonMatching.map((h) => h.ticker).join(", ") || "—"}.`
+            );
+          } catch (e) {
+            appendTranscript(
+              "assistant",
+              `Couldn't compute the overlap: ${e instanceof Error ? e.message : "unknown error"}.`
+            );
+          }
+          break;
+        }
+        case "monitoring_enable_daily": {
+          toast.success("Daily monitoring on.", {
+            description: "Demo workflow — I'll email you at 6am every day.",
+          });
+          appendTranscript(
+            "assistant",
+            "Daily monitoring on. I'll email you at 6am every day, change-or-no-change. (Demo workflow — no real schedule is started.)"
+          );
+          break;
+        }
+        case "restart": {
+          screener.reset();
+          appendTranscript("assistant", "Funnel reset. We're back to the universe stage.");
+          break;
+        }
+        case "fallback":
+        default: {
+          appendTranscript(
+            "assistant",
+            "I can't answer that in this demo. Try asking about a filter, a stock's price or market cap, or running the OC initial screen."
+          );
+          break;
+        }
+      }
+      // `text` is unused here but reserved for future narration that may quote the user.
+      void text;
+    },
+    [screener, nextFilter, preset, runInitialScreen, appendTranscript]
+  );
+
+  const ask = useCallback(
+    async (text: string) => {
+      if (!isStarted) {
+        toast.message("Press Start Screening first.");
+        return;
+      }
+      appendTranscript("user", text);
+      setIsThinking(true);
+      try {
+        const res = await fetch("/api/v1/screen/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `process failed: ${res.status}`);
+        }
+        const data = (await res.json()) as { intent: Intent; text: string };
+        await handleIntent(text, data.intent);
+      } catch (e) {
+        appendTranscript(
+          "assistant",
+          `Error: ${e instanceof Error ? e.message : "couldn't classify the question"}.`
+        );
+      } finally {
+        setIsThinking(false);
+      }
+    },
+    [isStarted, appendTranscript, handleIntent]
+  );
+
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] text-white">
       {/* ─── Header ───────────────────────────────────────────── */}
@@ -76,9 +255,7 @@ export function ScreenPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {screener.snapshot ? (
-            <SourceBadge snapshot={screener.snapshot} />
-          ) : null}
+          {screener.snapshot ? <SourceBadge snapshot={screener.snapshot} /> : null}
         </div>
       </header>
 
@@ -91,10 +268,10 @@ export function ScreenPage() {
 
       {/* ─── Body ────────────────────────────────────────────── */}
       <main className="flex flex-1 min-h-0 flex-col lg:flex-row">
-        {/* Left rail: avatar placeholder + funnel */}
+        {/* Left rail */}
         <aside className="flex w-full flex-col gap-6 border-r border-white/10 p-4 lg:w-[22rem]">
           <div className="flex aspect-video items-center justify-center rounded-2xl bg-[var(--oc-navy)] text-xs text-white/40">
-            Avatar (phase 5)
+            Avatar (phase 6)
           </div>
 
           {!isStarted ? (
@@ -121,6 +298,7 @@ export function ScreenPage() {
                   {(["questionnaire", "methodology"] as Preset[]).map((p) => (
                     <button
                       key={p}
+                      type="button"
                       onClick={() => setPreset(p)}
                       disabled={screener.stages.length > 1}
                       className={`rounded px-2 py-1 text-xs ${
@@ -158,7 +336,7 @@ export function ScreenPage() {
           )}
         </aside>
 
-        {/* Right pane: stocks table */}
+        {/* Right pane: stocks table + conversation */}
         <section className="flex flex-1 min-h-0 flex-col">
           {isStarted ? (
             <>
@@ -176,12 +354,20 @@ export function ScreenPage() {
                   </span>
                 ) : null}
               </div>
-              <StocksTable
-                rows={screener.currentRows}
-                onTickerClick={setSelectedTicker}
-                selectedTicker={selectedTicker}
-                className="flex-1 min-h-0 flex flex-col"
-              />
+              <div className="flex flex-1 min-h-0">
+                <StocksTable
+                  rows={screener.currentRows}
+                  onTickerClick={setSelectedTicker}
+                  selectedTicker={selectedTicker}
+                  className="flex-1 min-h-0 flex flex-col"
+                />
+                <ConversationPane
+                  transcript={transcript}
+                  isThinking={isThinking}
+                  onAsk={ask}
+                  className="hidden lg:flex flex-col w-[26rem] border-l border-white/10"
+                />
+              </div>
               {selectedTicker ? (
                 <StockFactPanel
                   key={selectedTicker}
@@ -189,6 +375,13 @@ export function ScreenPage() {
                   onClose={() => setSelectedTicker(null)}
                 />
               ) : null}
+              {/* Mobile: conversation under the table */}
+              <ConversationPane
+                transcript={transcript}
+                isThinking={isThinking}
+                onAsk={ask}
+                className="lg:hidden flex flex-col h-[40svh] border-t border-white/10"
+              />
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-white/40">

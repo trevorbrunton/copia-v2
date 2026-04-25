@@ -19,7 +19,13 @@ const REQUIREMENTS: EnvRequirement[] = [
   // External APIs the public demo depends on.
   {
     name: "ELEVENLABS_API_KEY",
-    reason: "voice STT — POST /api/v1/screen/process will return 502",
+    reason:
+      "voice STT (POST /api/v1/screen/process) AND Audio Echo TTS (POST /api/v1/screen/tts) — both routes return 502 without it",
+  },
+  {
+    name: "ELEVENLABS_VOICE_ID",
+    reason:
+      "ElevenLabs voice id used by Audio Echo. Without it, TTS fails and useTavusAvatar.echo() falls back to text echo (Cartesia-rendered, voice rotation returns)",
   },
   {
     name: "ANTHROPIC_API_KEY",

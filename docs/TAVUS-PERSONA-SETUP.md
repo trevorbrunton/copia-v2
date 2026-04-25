@@ -19,12 +19,30 @@ If the persona is left at `pipeline_mode: "full"`, you get the **two-voices** sy
 
 ## Two flavours of echo
 
-Tavus documents two flavours under *Server-to-Server Architecture*:
+Tavus documents two flavours:
 
-- **Text Echo** — you send `properties.text`; Tavus's TTS speaks it; replica lip-syncs. This is what we use today.
-- **Audio Echo** — you send pre-rendered audio bytes (your own TTS); Tavus only does lip-sync. Useful if you want full voice control or to keep PHI out of Tavus entirely.
+- **Text Echo** — you send `properties.text`; Tavus's TTS layer (Cartesia/ElevenLabs/Inworld) synthesises and the replica lip-syncs. Voice consistency depends entirely on the persona's TTS configuration. **We use this only as a fallback** when our TTS path is unavailable.
+- **Audio Echo** — you send pre-rendered audio bytes; Tavus only does lip-sync. **This is the default path in this repo.** `tavusAvatar.echo()` calls `POST /api/v1/screen/tts` (ElevenLabs `eleven_turbo_v2_5` in the configured voice → base64 PCM 24 kHz mono), then chunks the bytes and dispatches them as `conversation.echo` Daily app-messages with `modality: "audio"`, all sharing one `inference_id`, last chunk `done: "true"`. Speech-end is signalled by Tavus's `conversation.replica.stopped_speaking` event matching our `inference_id` — replaces the old text-length fallback timer.
 
-If you ever need to keep utterance text out of Tavus's data path (e.g. for ISO-27001 / DPIA reasons), switch to Audio Echo and route all TTS through ElevenLabs server-side. No code in this repo does that today.
+### Audio Echo wire format
+
+```js
+{
+  message_type: "conversation",
+  event_type: "conversation.echo",
+  properties: {
+    modality: "audio",
+    audio: "<base64 chunk>",
+    sample_rate: 24000,
+    inference_id: "<uuid>",
+    done: "true" | "false"   // string, not boolean
+  }
+}
+```
+
+Audio is **base64-encoded PCM 16-bit signed little-endian mono at 24 kHz** (`output_format=pcm_24000` from ElevenLabs lines up exactly — no transcoding). Chunks are ~12 KB of base64 (~9 KB raw, ~190 ms of audio); Daily app-messages cap at ~16 KB.
+
+When Audio Echo is active, the persona's TTS layer is irrelevant — `voice_settings`/`tts_engine`/`external_voice_id` only matter for the text-echo fallback path. Voice consistency is now controlled by `ELEVENLABS_VOICE_ID`, not by the persona.
 
 ## Create an echo-mode persona
 
@@ -116,9 +134,15 @@ Both schemas are documented under *Tavus → Interactions Protocol*.
 ## Related env vars
 
 ```env
-TAVUS_API_KEY=                  # server-side, used for conversation create + DELETE
+# Tavus
+TAVUS_API_KEY=                  # server-side; conversation create + DELETE
 TAVUS_REPLICA_ID=               # default replica if persona doesn't set one
 NEXT_PUBLIC_TAVUS_PERSONA_ID=   # echo-mode persona id used by /demo/screen
+
+# ElevenLabs — controls the actual voice you hear via Audio Echo
+ELEVENLABS_API_KEY=             # server-side; used by /screen/tts and /screen/process
+ELEVENLABS_VOICE_ID=            # voice id (stock or cloned). Without it, Audio Echo fails and we fall back to text echo
+ELEVENLABS_MODEL_ID=            # optional; default eleven_turbo_v2_5
 ```
 
-`NEXT_PUBLIC_TAVUS_PERSONA_ID` is public so the client can pass it through to `POST /api/v1/demo/tavus`. The API key stays server-side.
+`NEXT_PUBLIC_TAVUS_PERSONA_ID` is public so the client can pass it through to `POST /api/v1/demo/tavus`. All keys stay server-side.

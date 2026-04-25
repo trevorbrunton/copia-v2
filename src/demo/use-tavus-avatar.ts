@@ -23,6 +23,52 @@ function endConversation(conversationId: string): void {
 const RECONNECT_FAILED_MSG = "Pep disconnected and reconnect failed.";
 const RECONNECTING_MSG = "Pep disconnected — reconnecting…";
 
+/**
+ * Daily's `sendAppMessage` caps each payload at ~16 KB. ElevenLabs
+ * TTS at 24 kHz 16-bit mono produces ~48 KB per second of audio
+ * (~64 KB once base64-encoded), so any non-trivial utterance has to
+ * be chunked. Picked to leave headroom for the JSON wrapper.
+ */
+const AUDIO_ECHO_CHUNK_BASE64_CHARS = 12_000;
+
+interface AudioEchoPayload {
+  audio: string;
+  sampleRate: number;
+  inferenceId: string;
+}
+
+/**
+ * Send a base64 PCM payload as a sequence of Audio Echo events. All
+ * chunks share the same `inference_id`; the final chunk carries
+ * `done: "true"` per the Tavus Interactions Protocol. Schema verified
+ * against Tavus-Engineering/tavus-skills (CVI Interactions skill).
+ */
+function sendAudioEcho(
+  call: DailyCall,
+  { audio, sampleRate, inferenceId }: AudioEchoPayload
+): void {
+  const total = audio.length;
+  for (let offset = 0; offset < total; offset += AUDIO_ECHO_CHUNK_BASE64_CHARS) {
+    const chunk = audio.slice(offset, offset + AUDIO_ECHO_CHUNK_BASE64_CHARS);
+    const isLast = offset + AUDIO_ECHO_CHUNK_BASE64_CHARS >= total;
+    call.sendAppMessage(
+      {
+        message_type: "conversation",
+        event_type: "conversation.echo",
+        properties: {
+          modality: "audio",
+          audio: chunk,
+          sample_rate: sampleRate,
+          inference_id: inferenceId,
+          // Tavus expects strings, not booleans.
+          done: isLast ? "true" : "false",
+        },
+      },
+      "*"
+    );
+  }
+}
+
 export type TavusAvatarStatus =
   | "idle"
   | "loading"
@@ -65,6 +111,11 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   const echoResolveRef = useRef<(() => void) | null>(null);
   // Timer for the echo() fallback timeout so unmount can clear it.
   const echoFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Inference id of the in-flight echo (Audio Echo path). The
+  // app-message listener uses this to ignore stale stopped_speaking
+  // events from earlier utterances. Null when no echo is in flight or
+  // when we fell back to text echo (which has no inference_id).
+  const currentInferenceIdRef = useRef<string | null>(null);
   // Persisted across reconnect attempts: the persona we last initialised
   // with, and a one-shot guard so a flaky connection can't loop on
   // creating new (billable) Tavus conversations.
@@ -218,22 +269,34 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         });
 
         // Listen for Tavus CVI app-messages to detect speech completion.
+        // Audio Echo: stopped_speaking includes our inference_id, so we
+        // can ignore stale events from earlier utterances. Text echo
+        // (no tracking) keeps the legacy string-match behaviour.
         call.on("app-message", (evt) => {
           const data = evt?.data;
           if (!data) return;
           const eventType: string = data.event_type ?? data.type ?? "";
-          if (
+          const isSpeechEnd =
             eventType.includes("utterance_end") ||
             eventType.includes("echo_end") ||
             eventType.includes("response_end") ||
-            eventType.includes("stopped_speaking")
-          ) {
-            console.log("[tavus] Speech end detected via:", eventType);
-            setStatus((prev) => (prev === "speaking" ? "ready" : prev));
-            if (echoResolveRef.current) {
-              echoResolveRef.current();
-              echoResolveRef.current = null;
-            }
+            eventType.includes("stopped_speaking");
+          if (!isSpeechEnd) return;
+
+          const ours = currentInferenceIdRef.current;
+          const eventInferenceId: string | undefined =
+            data?.properties?.inference_id;
+          if (ours && eventInferenceId && eventInferenceId !== ours) {
+            // Stale: speech-end belongs to an earlier (or unrelated) utterance.
+            return;
+          }
+
+          console.log("[tavus] Speech end detected via:", eventType);
+          setStatus((prev) => (prev === "speaking" ? "ready" : prev));
+          currentInferenceIdRef.current = null;
+          if (echoResolveRef.current) {
+            echoResolveRef.current();
+            echoResolveRef.current = null;
           }
         });
 
@@ -295,34 +358,62 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   }, [initAvatar]);
 
   /**
-   * Send text for the replica to speak verbatim with lip-sync (echo mode).
-   * Resolves when the replica signals speech completion via app-message,
-   * or after a fallback timeout estimated from text length.
+   * Send text for the replica to speak. Path:
    *
-   * Estimated at ~55ms per character — calibrated to slightly undershoot
-   * actual speech duration so the gap is minimal if the fallback fires.
+   *  1. POST /api/v1/screen/tts → ElevenLabs synthesises the utterance
+   *     in our chosen voice and returns base64 PCM 24 kHz + an
+   *     inference_id.
+   *  2. Chunk the base64 audio (Daily app-messages cap at ~16 KB) and
+   *     send each piece as a `conversation.echo` event with
+   *     `modality: "audio"` and a shared inference_id; the final chunk
+   *     carries `done: "true"`.
+   *  3. Resolve when Tavus fires
+   *     `conversation.replica.stopped_speaking` for our inference_id,
+   *     or the per-utterance fallback timeout fires.
+   *
+   * If the TTS fetch fails (key missing, ElevenLabs outage), we fall
+   * back to text echo — Tavus's persona TTS speaks the line through
+   * Cartesia. Voice consistency degrades, but Pep keeps talking.
    */
-  const echo = useCallback((text: string): Promise<void> => {
+  const echo = useCallback(async (text: string): Promise<void> => {
     const call = callRef.current;
     if (!call) {
       console.warn("Tavus: No active call for echo");
-      return Promise.resolve();
+      return;
     }
 
-    return new Promise((resolve) => {
-      // Fallback: ~55ms/char + 1s buffer. Intentionally tighter than before
-      // to minimise the gap if no speech-end event arrives.
+    // Try Audio Echo first — fall back to text echo if TTS unavailable.
+    let audioPayload: AudioEchoPayload | null = null;
+    try {
+      const res = await fetch("/api/v1/screen/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) {
+        audioPayload = (await res.json()) as AudioEchoPayload;
+      } else {
+        console.warn("[tavus] /tts non-2xx, falling back to text echo:", res.status);
+      }
+    } catch (err) {
+      console.warn("[tavus] /tts failed, falling back to text echo:", err);
+    }
+
+    return new Promise<void>((resolve) => {
+      // Fallback timer — mirrors the prior behaviour: ~55ms/char + 1s.
+      // Still useful as a safety net when the stopped_speaking event
+      // doesn't arrive (network blip, replica drop).
       const fallbackMs = Math.max(3000, text.length * 55 + 1000);
       const fallback = setTimeout(() => {
         console.warn("[tavus] echo fallback timeout fired after", fallbackMs, "ms");
         echoFallbackRef.current = null;
+        currentInferenceIdRef.current = null;
         setStatus((prev) => (prev === "speaking" ? "ready" : prev));
         echoResolveRef.current = null;
         resolve();
       }, fallbackMs);
       echoFallbackRef.current = fallback;
 
-      // Store resolve so the app-message listener can call it
       echoResolveRef.current = () => {
         clearTimeout(fallback);
         echoFallbackRef.current = null;
@@ -331,22 +422,28 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
       try {
         setStatus("speaking");
-        // Schema per Tavus Interactions Protocol → Echo Interaction.
-        // The persona must be `pipeline_mode: "echo"` for this to be the
-        // ONLY voice path; otherwise the persona's LLM speaks in parallel
-        // (the "two voices" failure mode). See docs/TAVUS-PERSONA-SETUP.md.
-        call.sendAppMessage(
-          {
-            message_type: "conversation",
-            event_type: "conversation.echo",
-            properties: { text },
-          },
-          "*"
-        );
+        if (audioPayload) {
+          currentInferenceIdRef.current = audioPayload.inferenceId;
+          sendAudioEcho(call, audioPayload);
+        } else {
+          currentInferenceIdRef.current = null;
+          // Schema per Tavus Interactions Protocol → Echo Interaction.
+          // pipeline_mode: "echo" is required on the persona. See
+          // docs/TAVUS-PERSONA-SETUP.md.
+          call.sendAppMessage(
+            {
+              message_type: "conversation",
+              event_type: "conversation.echo",
+              properties: { modality: "text", text },
+            },
+            "*"
+          );
+        }
       } catch (err) {
         clearTimeout(fallback);
         echoFallbackRef.current = null;
         echoResolveRef.current = null;
+        currentInferenceIdRef.current = null;
         const msg = err instanceof Error ? err.message : "Echo failed";
         setError(msg);
         setStatus("ready");

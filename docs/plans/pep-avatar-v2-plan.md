@@ -14,7 +14,7 @@
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
 | 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` (initial), `4e0e3fd` (review fixes) |
-| 6. Polish and pitch hardening | ✓ Complete | (this commit) |
+| 6. Polish and pitch hardening | ✓ Complete | `2274c0c` |
 | 7. v1 code decommission | Not started | — |
 
 ---

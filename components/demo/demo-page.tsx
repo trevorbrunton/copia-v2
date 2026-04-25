@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useDemo } from "@/src/demo/use-demo";
-import { PERSONA, USE_TAVUS_AVATAR, USE_LIVE_AVATAR } from "@/src/demo/config";
+import { PERSONA, USE_TAVUS_AVATAR } from "@/src/demo/config";
 import { AvatarPanel } from "./avatar-panel";
 import { ChatPanel } from "./chat-panel";
 import { StatusBadge } from "./status-badge";
@@ -24,8 +24,6 @@ export function DemoPage() {
     disconnect,
     isConnected,
     avatarStream,
-    attachAvatar,
-    avatarReady,
     currentVideoSrc,
     handleVideoEnded,
   } = useDemo();
@@ -51,12 +49,9 @@ export function DemoPage() {
       <main className="flex flex-1 flex-col lg:flex-row gap-0 lg:gap-6 p-4 lg:p-6 overflow-hidden">
         <div className="w-full lg:w-1/2 xl:w-3/5 shrink-0 flex flex-col items-center">
           <AvatarPanel
-            status={status}
             isConnected={isConnected}
             mediaStream={avatarStream}
-            attachAvatar={USE_LIVE_AVATAR ? attachAvatar : undefined}
-            avatarReady={avatarReady}
-            expectsStream={USE_TAVUS_AVATAR || USE_LIVE_AVATAR}
+            expectsStream={USE_TAVUS_AVATAR}
             videoSrc={currentVideoSrc}
             onVideoEnded={handleVideoEnded}
           />

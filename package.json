@@ -16,11 +16,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@11labs/react": "^0.2.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1000.0",
     "@daily-co/daily-js": "^0.89.1",
-    "@elevenlabs/client": "^0.15.2",
-    "@heygen/liveavatar-web-sdk": "^0.0.11",
     "@hookform/resolvers": "^5.2.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.98.0",

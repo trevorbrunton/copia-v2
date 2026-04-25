@@ -18,7 +18,6 @@ export interface MatchResult {
   label: string;
   answerText: string;
   audioUrl: string;
-  pcmUrl: string;
   videoUrl: string;
 }
 
@@ -148,7 +147,6 @@ export async function matchQuestion(userText: string): Promise<MatchResult> {
       answerText:
         "That's a great question. For more detail on that topic, I'd suggest speaking directly with our investor relations team.",
       audioUrl: `${MEDIA_BASE}/audio/fallback.mp3`,
-      pcmUrl: `${MEDIA_BASE}/audio/fallback.pcm`,
       videoUrl: `${MEDIA_BASE}/video/fallback.mp4`,
     };
   }
@@ -158,7 +156,6 @@ export async function matchQuestion(userText: string): Promise<MatchResult> {
     label: matched.label,
     answerText: matched.answerText,
     audioUrl: `${MEDIA_BASE}/audio/${matched.category}.mp3`,
-    pcmUrl: `${MEDIA_BASE}/audio/${matched.category}.pcm`,
     videoUrl: `${MEDIA_BASE}/video/${matched.category}.mp4`,
   };
 }

@@ -55,14 +55,10 @@ app/
 │       ├── user/devices/   # GET devices, [id] remove device
 │       ├── user/login-history/ # GET login history
 │       └── demo/              # Investor demo API (unauthenticated)
-│           ├── chat/          # POST — Voiceflow RAG agent (legacy)
-│           ├── tts/           # POST — ElevenLabs text-to-speech (streaming)
-│           ├── avatar/        # POST — HeyGen streaming avatar (create/speak/close)
 │           ├── tavus/         # POST — Tavus CVI conversation (create)
 │           ├── tavus/[conversationId]/ # DELETE — End Tavus conversation (cleanup)
-│           ├── process/       # POST — Unified STT + classification (Gemini Flash or ElevenLabs+Bedrock)
-│           ├── transcribe/    # POST — ElevenLabs STT (PCM→WAV→scribe_v1) [legacy, kept for standalone use]
-│           └── match/         # POST — Bedrock Haiku question→category matcher [legacy, kept for standalone use]
+│           ├── process/       # POST — Unified STT (ElevenLabs) + classification (Anthropic Haiku)
+│           └── qa/            # CRUD for demo Q&A pairs (admin, auth-protected)
 ├── demo/               # Public investor demo page (no auth)
 ├── layout.tsx          # Root layout with providers
 └── globals.css
@@ -111,15 +107,13 @@ src/
 │   ├── schema.ts       # users, projects, meetings, chat, userDevices, userSessions, userStatusHistory, demoResponses, demoQuestionPatterns
 │   └── migrations/     # SQL migrations
 ├── demo/               # Investor demo module (OC Mid-Cap Fund)
-│   ├── config.ts       # Avatar mode flags, processing mode, persona, VAD config
-│   ├── types.ts        # ChatMessage, DemoStatus, AvatarSession
+│   ├── config.ts       # Avatar mode flags (tavus | haiku), persona
+│   ├── types.ts        # ChatMessage, DemoStatus
 │   ├── classifier.ts   # Static PREGENERATED response map (30 categories with media URLs)
-│   ├── bedrock-matcher.ts # Bedrock Haiku question classifier (DB-backed, cached)
-│   ├── gemini-matcher.ts  # Gemini Flash audio classifier (STT + classification in one call)
+│   ├── bedrock-matcher.ts # Anthropic Haiku question classifier (DB-backed, cached)
 │   ├── use-voice-listener.ts # Continuous VAD + PCM capture (AudioContext, configurable silence timeout)
-│   ├── use-avatar.ts   # useAvatar hook (HeyGen LiveAvatar SDK)
 │   ├── use-tavus-avatar.ts # useTavusAvatar hook (Tavus CVI via Daily.co WebRTC)
-│   ├── use-demo.ts     # useDemo hook (orchestrates local pipeline + agent modes)
+│   ├── use-demo.ts     # useDemo hook (VAD → process → playResponse)
 │   └── index.ts        # Public API exports
 ├── hooks/
 │   ├── use-user.ts     # User profile + delete account (with cache invalidation)
@@ -227,25 +221,17 @@ Use `@/*` to import from the project root.
 
 ### Investor Demo (OC Mid-Cap Fund)
 - Public page at `/demo` — no auth required (added to `PUBLIC_ROUTES` in `proxy.ts`)
-- Two processing pipelines controlled by `NEXT_PUBLIC_PROCESSING_MODE` in `src/demo/config.ts`:
-  - **Flash pipeline** (`flash`): VAD → unified `POST /api/v1/demo/process` → Gemini 2.5 Flash (STT + classification in single multimodal call) → DB responses
-  - **Default pipeline** (`default` or unset): VAD → unified `POST /api/v1/demo/process` → ElevenLabs STT → Bedrock Haiku classifier → DB responses
-- Local pipeline modes (haiku, live, tavus) use VAD-based voice capture; video/audio modes use ElevenLabs Conversational AI agent
-- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"video"` | `"live"` | `"tavus"` | `"haiku"` | `"audio"`
-- Tavus mode recommended: continuous WebRTC stream via Daily.co with echo-based lip-sync (no visual cuts between responses)
-- Unauthenticated API routes under `/api/v1/demo/` (tts, avatar, tavus, tavus/[id], process, transcribe, match)
+- Single pipeline: VAD → unified `POST /api/v1/demo/process` (ElevenLabs STT → Anthropic Haiku classifier) → DB responses
+- Avatar mode controlled by `NEXT_PUBLIC_AVATAR_MODE`: `"tavus"` | `"haiku"`
+  - **`tavus`**: continuous WebRTC stream via Daily.co with echo-based lip-sync (no visual cuts between responses)
+  - **`haiku`**: pre-recorded MP4s with idle loop underneath and response video on top (zero-flicker dual-layer)
+- Unauthenticated API routes under `/api/v1/demo/` (tavus, tavus/[id], process)
 - `useDemo()` hook orchestrates voice input, response matching, and avatar playback
 - `useVoiceListener()` provides continuous voice capture with amplitude-based VAD (silence timeout configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`, default 1000ms)
-- `gemini-matcher.ts` sends audio directly to Gemini 2.5 Flash for combined STT + classification (flash mode)
-- `bedrock-matcher.ts` loads `demoResponses` + `demoQuestionPatterns` from DB (cached), sends to Bedrock Haiku for classification (default mode)
+- `bedrock-matcher.ts` loads `demoResponses` + `demoQuestionPatterns` from DB (cached), sends to Anthropic Haiku for classification
 - Tavus conversation cleanup: `DELETE /api/v1/demo/tavus/[conversationId]` ends conversations server-side; also fires on component unmount
-- Dual-layer `AvatarPanel` (idle video loops underneath, response video plays on top) for video/haiku modes; Tavus/Live modes use continuous WebRTC stream
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
-- Flash env vars: `GEMINI_API_KEY`, `GEMINI_MODEL` (optional, default `gemini-2.5-flash`)
-- Default pipeline env vars: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`
-- Anthropic env vars (default pipeline classifier): `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional, default `claude-haiku-4-5-20251001`)
-- LiveAvatar env vars: `LIVEAVATAR_API_KEY`, `NEXT_PUBLIC_LIVEAVATAR_AVATAR_ID`
-- Tavus env vars: `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
+- Env vars: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`
 
 ## Environment Variables
 

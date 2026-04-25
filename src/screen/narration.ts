@@ -121,5 +121,5 @@ export function describeFunnelComplete(): string {
 
 /** One-shot opener spoken when the avatar reaches `ready` and the snapshot has loaded. */
 export function describeOpening(): string {
-  return `Hi — I'm Pep. Ask me about the OC Mid-Cap screen, or say "run the OC initial screen" to get started.`;
+  return `Hi — I'm Pep. Say "run the OC initial screen" to get started.`;
 }

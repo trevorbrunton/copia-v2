@@ -71,6 +71,7 @@ Two of the OC criteria are inherently subjective and cannot be derived purely fr
 | 4.3 | **Single-commodity / single-mine — initial curated list:** NST, EVN, PRU, GMD, RMS (gold); SFR, CSC (copper); AAI (aluminium); LYC (rare earths); YAL, WHC (coal); WDS, STO (oil & gas E&P); ALD (oil & gas refining). 14 names. Border calls deliberately kept *out* of the flag (so they pass the filter): BHP, RIO, FMG, MIN, S32 (multi-commodity); BSL (steel manufacturer rather than commodity producer); ORI (specialty chemicals, multi-product). |
 | 4.4 | **Unproven / complex tech — initial curated list:** none flagged on the current Q4 survivors. The avatar's spoken answer reflects Pep's own scripted narration ("every stock with unproven tech in our universe has already been excluded by the profitability filter") with that wording presented as a curated assertion, not an automatic conclusion. |
 | 4.5 | If Pep supplies a more authoritative spreadsheet defining these flags, we'll re-seed the database from it. The current curation is the placeholder until then. |
+| 4.6 | **ASX 100 membership** (used by the Methodology preset's `exclude_asx_100` step) is approximated as the **top 100 stocks by market cap from the snapshot itself**. The actual S&P/ASX 100 index is rebalanced quarterly by S&P; using the snapshot's own ranking is close but not identical. **Confirm: is the snapshot-ranked approximation acceptable, or do you want us to commit the official S&P/ASX 100 ticker list?** |
 
 ## 5. The eight supplied questions
 
@@ -93,6 +94,7 @@ Two of the OC criteria are inherently subjective and cannot be derived purely fr
 | 5.4 | Q6 references "page 12 of the FSC questionnaire." We display the spoken reference but do not embed the actual PDF excerpt in v2. |
 | 5.5 | Q7 (daily email) is presented as a demo workflow that confirms intent. It does not start a real scheduled job. |
 | 5.6 | Q8 uses the supplied 10-holding sample portfolio (see §6) and the avatar explicitly labels the answer as based on sample data. |
+| 5.7 | "Earnings status" answers are derived from the sign of TTM net income — the avatar says one of *"Profitable (TTM)"*, *"Unprofitable (TTM)"*, or *"Insufficient data"*. The source snapshot does not carry actual reporting-calendar data (next-result date, "in pre-result quiet period" etc.), so we use this profitability summary instead. **Confirm: is this acceptable, or do you want a richer earnings-status concept?** |
 
 ## 6. Sample portfolio (Q8)
 
@@ -144,8 +146,10 @@ The sample portfolio for Q8 is seeded with the **10 real holdings supplied** (Ma
 | # | Assumption |
 |---|---|
 | 9.1 | Funnel and stock-fact answers always show the snapshot's collection timestamp. |
-| 9.2 | If the snapshot is older than 7 days, a yellow banner appears in the UI: *"Snapshot is X days old."* |
-| 9.3 | If older than 30 days, the banner turns red. The avatar acknowledges this if asked. |
+| 9.2 | If the snapshot is **0–7 days old**: no banner. |
+| 9.3 | If **8–30 days old**: yellow banner *"Snapshot is X days old."*. The avatar continues to mention the snapshot date in stock-fact answers as it always does. |
+| 9.4 | If **older than 30 days**: red banner *"Snapshot is X days old — values may be significantly stale."*. The avatar volunteers the staleness in the next stock-fact answer. |
+| 9.5 | The data-quality footnote on the funnel rail surfaces the count of securities excluded due to incomplete enrichment (currently 139 of 1,979 lack a market-cap value and are excluded from market-cap-dependent filters). |
 
 ## 10. The pitch user-flow
 
@@ -177,6 +181,8 @@ The following are not blockers for v2 but should be on the OC team's radar:
 | 12.2 | Should we display the FSC-questionnaire page-12 excerpt as an embedded PDF inside the demo when Q6 is asked? | A small UI add if the OC team wants this; not in scope for v2 unless requested. |
 | 12.3 | Should the demo expose a simple "save snapshot of current shortlist" button (e.g. download CSV) to pair with the spoken "show or email" prompts? | Adds polish but isn't currently scoped. |
 | 12.4 | Will Q8 ever need the **real** current OC Premium Small Company Fund holdings rather than the supplied 10 sample names? | If yes, send us the list; we re-seed via upsert in minutes. |
+| 12.5 | Earnings-status concept (see 5.7) — is *"Profitable (TTM)"* / *"Unprofitable (TTM)"* / *"Insufficient data"* sufficient, or should the avatar speak something richer like *"FY25 reported on dd/mm/yyyy"*? Richer would require a separate calendar feed. | Snapshot-only for v2 means the simpler form; richer is a v3 add. |
+| 12.6 | ASX 100 source (see 4.6) — snapshot-ranked top-100 vs. official S&P/ASX 100 list? | Snapshot-ranked is the v2 default. |
 
 ---
 

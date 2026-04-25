@@ -92,10 +92,12 @@ Used to answer the supplied 8 questions in the same order they were written:
 
 1. Market cap over $50m
 2. Remove top 100 by market cap
-3. Remove names below the agreed liquidity threshold
+3. Remove names below the agreed liquidity threshold (`turnover_ratio_ttm >= 0.20`)
 4. Remove unprofitable names
 5. Remove unproven / complex technology
 6. Remove single commodity / single mine names
+
+**Funnel-rail rendering of Q5:** the unproven-tech step always produces a stage entry in the rail, even when the curated flag set is empty (which is the case for v2). The rail shows it with the same count as the previous stage and the avatar narrates the "subsumed by profitability" answer. Skipping the step would hide that the filter was considered.
 
 **OC initial screen preset**
 
@@ -111,11 +113,9 @@ Used when the user asks for the actual OC-style initial screen:
 
 This split fixes the biggest problem in the old plan: the demo can still answer Pep's scripted questions without misrepresenting the OC methodology.
 
-### 4c. Open rule requiring explicit agreement
+### 4c. Liquidity rule (locked)
 
-One rule is still not locked by the brief and should be called out in the plan instead of hidden in implementation:
-
-- **Liquidity rule:** for the questionnaire flow, use the supplied `annual turnover >= 20%` rule. For the OC methodology preset, either use the same proxy for demo simplicity or implement the questionnaire's more literal liquidity interpretation. This choice must be written down before build starts.
+Both the Questionnaire preset (step 3) and the Methodology preset (step 6) use the same proxy: `turnover_ratio_ttm >= 0.20` (Pep's stated rule). See §12 #1.
 
 ---
 
@@ -147,17 +147,24 @@ asx_securities
   market_cap_snapshot numeric
   close_price_snapshot numeric
   shares_outstanding bigint
+  volume_latest bigint
+  avg_volume_252d bigint
+  total_volume_252d bigint
   turnover_ratio_ttm numeric
+  eps_ttm numeric
   net_income_ttm numeric
   free_cash_flow_ttm numeric
-  earnings_status_snapshot text
-  is_profitable boolean
-  is_cashflow_positive boolean
+  long_business_summary text
+  earnings_status_snapshot text     -- derived; see §5b
+  is_profitable boolean             -- derived: net_income_ttm > 0
+  is_cashflow_positive boolean      -- derived: free_cash_flow_ttm > 0
   is_unproven_or_complex_tech boolean
   is_single_commodity_or_single_mine boolean
-  is_asx_100 boolean
-  data_quality jsonb
+  is_asx_100 boolean                -- derived; see §5b
+  data_quality jsonb                -- shape: { enrichment_status: "ok" | "partial" | "failed", missing_fields: string[] }
   unique (snapshot_id, ticker)
+  index on (snapshot_id, market_cap_snapshot desc)
+  index on ticker
 
 oc_holdings
   id uuid pk
@@ -188,20 +195,26 @@ Notes:
 
 `scripts/ingest-asx-snapshot.ts` should:
 
-- Read the prepared ASX files.
-- Upsert the current snapshot into the new v2 tables.
-- Derive `is_profitable` and `is_cashflow_positive` from numeric fields.
-- Apply curated flags for:
-  - `is_unproven_or_complex_tech`
-  - `is_single_commodity_or_single_mine`
-  - `is_asx_100`
-- Emit a reconciliation summary at the end:
-  - universe size
-  - rows with missing market cap
-  - rows with missing profitability data
-  - final counts for each preset
-
-The ingest step is not complete until those counts have been reviewed against Pep's spreadsheet or an agreed expected fixture.
+- Read `data/asx/asx_universe.json` (or `$ASX_IMPORT_DIR/asx_universe.json`) → seeds the row set with `ticker`, `company_name`, `gics_industry_group`.
+- Merge `asx_ranked_light.json` on `ticker` → fills `market_cap_snapshot`, `close_price_snapshot`, `shares_outstanding`, `volume_*`, `turnover_ratio_ttm`.
+- Merge `asx_top500_enriched.json` on `ticker` → fills `gics_sub_industry`, `sector`, `eps_ttm`, `net_income_ttm`, `free_cash_flow_ttm`, `long_business_summary`.
+- **Derive** the following in code:
+  - `is_profitable = (net_income_ttm IS NOT NULL AND net_income_ttm > 0)`
+  - `is_cashflow_positive = (free_cash_flow_ttm IS NOT NULL AND free_cash_flow_ttm > 0)`
+  - `is_asx_100 = ticker IN (top 100 of this snapshot ranked by market_cap_snapshot DESC, NULLS LAST)` — i.e. derived from the snapshot itself, not from an external S&P feed. Approximation acknowledged in the assumptions doc.
+  - `earnings_status_snapshot` — string; one of `"Profitable (TTM)"`, `"Unprofitable (TTM)"`, `"Insufficient data"`. Derived from `net_income_ttm` sign with a `null → "Insufficient data"` clause. The avatar speaks this string verbatim. (Picked over richer alternatives because the source JSONs do not carry actual reporting-calendar data.)
+- **Apply curated flags** from a hand-edited file `data/curation.json`:
+  - `is_unproven_or_complex_tech` — empty for v2 (Pep's narration claims subsumption by profitability; no tickers tagged).
+  - `is_single_commodity_or_single_mine` — the 14 tickers in §4 of the assumptions doc.
+- **Populate `data_quality`** as `{ enrichment_status, missing_fields }` per row:
+  - `enrichment_status = "ok"` if all of `market_cap_snapshot, turnover_ratio_ttm, net_income_ttm` are non-null.
+  - `enrichment_status = "partial"` if any of those three is null but at least one is present.
+  - `enrichment_status = "failed"` if all three are null (only `company_name` + GICS came from `asx_universe.json`).
+  - `missing_fields` lists the null field names.
+- Upsert into `asx_securities` keyed on `(snapshot_id, ticker)` (idempotent re-runs).
+- **Emit a reconciliation summary** to stdout and write it to `data/reports/ingest-{{snapshot_date}}.json`:
+  - universe size, rows by `enrichment_status`, count per derived flag, final counts for **each preset stage** (Questionnaire 1–6, Methodology 1–7).
+- Compare the final-stage counts against `tests/screen/expected-preset-counts.json` (committed in phase 1). Exit non-zero if any count drifts.
 
 ---
 
@@ -258,10 +271,10 @@ Every stock-fact UI render and every spoken stock-fact answer includes the `sour
 
 Use a deterministic-first router:
 
-1. Exact / regex / synonym matching for the 8 supplied questions and a small set of stock-fact intents.
-2. Only if no rule matches, use a constrained classifier that can choose from the known intents only.
+1. **Rule layer.** Exact / regex / synonym matching for the 8 supplied questions and a small set of stock-fact intents. Implemented in `src/screen/intent-rules.ts` as an array of `{ pattern: RegExp, intent: Intent }`.
+2. **Constrained classifier fallback.** Only if no rule matches: send the utterance to Anthropic Haiku with a system prompt that lists the allowed intent IDs and instructs the model to return *exactly one of them* as a single token. Parse with a `z.enum([...])` Zod schema. If parsing fails, return `intent: "fallback"`. Never trust the model to invent intent names.
 
-This keeps the scripted pitch path robust while still handling paraphrases.
+The rule layer covers the scripted pitch path with zero LLM dependency. The classifier is only for paraphrases ("show me the big-cap names" → `apply_filter:mcap_50m`).
 
 ### 7b. Entity resolution
 
@@ -301,8 +314,19 @@ Required elements:
 - transcript / ask box
 - data-source badge: always `Snapshot {{snapshot_date}}` in v2 (single component, ready to render `Live` if a future provider is added)
 - visible timestamp on every stock-fact answer (the snapshot's `collected_at`)
-- staleness banner per the thresholds in §5/§9
-- small note for sample holdings if Q8 is not using real portfolio data
+- staleness banner driven by the thresholds below
+- small note for sample holdings when Q8 is using sample data (`is_sample = true`)
+- footnote on the funnel rail surfacing the count of securities excluded due to incomplete enrichment (`data_quality.enrichment_status = "failed"` or `"partial"` for relevant fields)
+
+### 8a. Staleness thresholds
+
+`age_days = days_between(now, asx_snapshots.collected_at)`.
+
+| Age | UI banner | Avatar acknowledgement |
+|---|---|---|
+| ≤ 7 days | none | none unless asked |
+| 8–30 days | yellow banner: *"Snapshot is {{age_days}} days old."* | mentions snapshot date in stock-fact answers (default behaviour) |
+| > 30 days | red banner: *"Snapshot is {{age_days}} days old — values may be significantly stale."* | volunteers the staleness in the next stock-fact answer |
 
 Recommended layout:
 
@@ -327,7 +351,7 @@ Transcript + ask box + source badges
 
 The revised plan is only done when all of the following are true:
 
-1. Existing demo routes and existing demo tables still work.
+1. v1 Supabase tables (`demo_responses`, `demo_question_patterns`) remain readable by the separate v1 app and have not been modified by v2 migrations. (v1 routes in *this* repo are removed in phase 7 — that's expected.)
 2. New ASX snapshot data is ingested into new v2 tables without changing existing tables.
 3. The app can run both:
    - the supplied 8-question flow
@@ -351,30 +375,34 @@ The revised plan is only done when all of the following are true:
 
 ### Phase 1 - schema, ingest, reconciliation
 
-- Add `src/db/screen-schema.ts`
-- update `drizzle.config.ts` to include both schema files
-- add ingest script
-- load `data/asx/*` into the new tables
-- derive the required flags and fields
-- reconcile counts against Pep material
+1. Add `src/db/screen-schema.ts` with the three new tables.
+2. Update `drizzle.config.ts` to register both schema files.
+3. Run `bun run db:generate`. **Manually verify** the produced SQL contains only `CREATE TABLE` statements for the three new tables — no `DROP TABLE` against `demo_responses` or `demo_question_patterns`. If any DROP statements are emitted, hand-edit them out before applying.
+4. Apply the migration via `bun scripts/run-migration.ts <new-migration-file>`.
+5. Commit `tests/screen/expected-preset-counts.json` with the expected per-stage counts derived from the snapshot (Questionnaire: 1979 → 487 → 100 → 86 → 79 → 79 → 65; Methodology: TBD after first ingest dry-run).
+6. Add `data/curation.json` with the 14 curated single-commodity tickers and an empty unproven-tech list.
+7. Write `scripts/ingest-asx-snapshot.ts` (idempotent upsert; emits the reconciliation summary defined in §5b; exits non-zero if counts drift from the fixture).
+8. Run the ingest. Confirm v1 demo at `/demo` still loads and answers correctly.
 
-**Exit criteria:** DB populated, existing demo unaffected, reconciliation report checked in or saved with the plan.
+**Exit criteria:** DB populated; reconciliation report at `data/reports/ingest-2026-04-24.json` checked in; expected-counts fixture passes; v1 demo unaffected.
 
 ### Phase 2 - screening engine
 
-- implement filter engine and preset runner
-- support both the questionnaire preset and OC initial screen preset
-- add deterministic tests for stage counts and membership
+1. **Write tests first** (`tests/screen/filters.test.ts`): apply each preset's filter sequence against the ingested snapshot, assert per-stage counts match the fixture.
+2. Implement filter engine + preset runner in `src/screen/funnel.ts`.
+3. Add `tests/screen/funnel-state.test.ts` for `ScreenState` transitions (synthetic state, fire intents, assert resulting state).
+4. Build `POST /api/v1/screen/apply-filter` (inline route pattern per D2).
 
-**Exit criteria:** snapshot-only screening works without voice or avatar.
+**Exit criteria:** snapshot-only screening works via the route without voice or avatar; both presets pass count tests.
 
 ### Phase 3 - UI and state
 
-- build `/demo/screen`
-- add funnel rail, shortlist table, transcript, source badges
-- preserve existing persona selector behaviour
+1. **Lift** the existing `PERSONA_OPTIONS` constant + radio group from `components/demo/demo-page.tsx` into a shared `components/demo/persona-selector.tsx`. Update v1's `demo-page.tsx` to import from the new location so v1 keeps working.
+2. Build `app/demo/screen/page.tsx` and `components/screen/{screen-page,funnel-rail,stocks-table,source-badge,staleness-banner}.tsx`.
+3. Wire `useScreener` hook with `ScreenState`.
+4. Mount at `/demo/screen`.
 
-**Exit criteria:** page is demoable with click and text input using snapshot data only.
+**Exit criteria:** page is demoable with click and text input using snapshot data only; persona selector renders identically to v1.
 
 ### Phase 4 - stock-fact provider (snapshot-backed)
 
@@ -389,19 +417,24 @@ Live-feed implementation is **explicitly deferred** (D3). No `LiveMarketDataProv
 
 ### Phase 5 - voice and routing
 
-- wire STT
-- add deterministic-first intent router
-- add constrained fallback classifier only for paraphrases
-- connect responses to Tavus echo
+1. **Write tests first**:
+   - `tests/screen/intent-rules.test.ts` — exact / regex matches for the 8 questions and stock-fact intents.
+   - `tests/screen/router.test.ts` — fixture of ~30 paraphrased utterances → expected intents (uses stubbed Anthropic responses captured once; live mode available for local re-record).
+   - `tests/screen/entity-resolution.test.ts` — ticker / company-name lookup.
+2. Implement `src/screen/intent-rules.ts`, `src/screen/screen-matcher.ts`, `src/screen/entity-resolver.ts`.
+3. Build `POST /api/v1/screen/process` (inline route, ElevenLabs STT + matcher + entity resolver).
+4. Connect responses to `tavusAvatar.echo()`.
 
-**Exit criteria:** the 8 supplied spoken questions work reliably in the happy path.
+**Exit criteria:** the 8 supplied spoken questions work reliably; classifier-fallback paraphrases route correctly per the fixture.
 
 ### Phase 6 - polish and pitch hardening
 
-- tighten answer wording
-- add sample-data labelling where required
-- add manual run-through script
-- test the deployed environment end-to-end against the snapshot
+- tighten answer wording per the spoken-answer policy (§7c)
+- add sample-data labelling for Q8 (`is_sample = true` rows)
+- add data-quality footnote on the funnel rail surfacing the `data_quality.enrichment_status != "ok"` count
+- wire the staleness banner per §8a thresholds
+- add manual run-through script at `docs/plans/pep-avatar-v2-pitch-script.md`
+- deploy to Vercel; run the manual script end-to-end against the deployed snapshot
 
 **Exit criteria:** pitch-ready.
 
@@ -409,7 +442,7 @@ Live-feed implementation is **explicitly deferred** (D3). No `LiveMarketDataProv
 
 Once v2 is end-to-end runnable and pitch-ready, remove v1 demo code from this repo. **Do not touch the v1 Supabase tables or their data** — the separate v1 app reads them.
 
-- Delete: `app/(public)/demo/page.tsx`-equivalent v1 route, `components/demo/demo-page.tsx`, `src/demo/use-demo.ts`, `src/demo/bedrock-matcher.ts`, `src/demo/classifier.ts`, `src/demo/config.ts`, `src/demo/types.ts`, `src/demo/index.ts`, `app/api/v1/demo/process/route.ts`, the qa admin (`app/api/v1/demo/qa/`, `app/(app)/config/page.tsx`, `components/config/qa-management.tsx`, `src/hooks/use-demo-qa.ts`, `src/services/demo-qa-service.ts`, `src/server/{commands,queries}/demo/*`).
+- Delete: `app/demo/page.tsx`, `components/demo/demo-page.tsx`, `src/demo/use-demo.ts`, `src/demo/bedrock-matcher.ts`, `src/demo/classifier.ts`, `src/demo/config.ts`, `src/demo/types.ts`, `src/demo/index.ts`, `app/api/v1/demo/process/route.ts`, the qa admin (`app/api/v1/demo/qa/`, `app/(app)/config/page.tsx`, `components/config/qa-management.tsx`, `src/hooks/use-demo-qa.ts`, `src/services/demo-qa-service.ts`, `src/server/commands/demo/`, `src/server/queries/demo/`).
 - Keep: `app/api/v1/demo/tavus/*` (avatar runtime — reused by v2), `useTavusAvatar`, `useVoiceListener`, `avatar-panel.tsx`, `chat-panel.tsx`, `status-badge.tsx`, `error-banner.tsx`, the `persona-selector.tsx` lifted earlier.
 - Keep in `src/db/schema.ts`: `demoResponses` and `demoQuestionPatterns` orphan exports — leaving them in the schema file prevents drizzle-kit from generating `DROP TABLE` migrations against the shared Supabase database that the v1 app still depends on.
 

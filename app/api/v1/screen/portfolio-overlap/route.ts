@@ -5,6 +5,16 @@ import { logger } from "@/src/lib/logger";
 import { db } from "@/src/db";
 import { ocHoldings } from "@/src/db/screen-schema";
 import { parseNumeric } from "@/src/screen/numeric";
+import { checkRateLimit } from "@/src/server/rate-limit";
+import { getClientIp } from "@/src/lib/api-response";
+
+// Cheap route (one DB read + a Set intersection) but unauthenticated;
+// limit just enough to deter abuse. Pitch usage is one Q8 click per
+// session — these caps leave generous headroom.
+const RATE_LIMITS = [
+  { limit: 60, windowMs: 60_000 },        // 60 / minute
+  { limit: 600, windowMs: 60 * 60_000 },  // 600 / hour
+] as const;
 
 /**
  * POST /api/v1/screen/portfolio-overlap
@@ -34,6 +44,7 @@ const BodySchema = z.object({
 export async function POST(req: Request) {
   const traceId = crypto.randomUUID();
   try {
+    checkRateLimit(`screen:portfolio-overlap:${getClientIp(req)}`, RATE_LIMITS);
     const raw = await req.json().catch(() => ({}));
     const { fromTickers } = BodySchema.parse(raw);
 

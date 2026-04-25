@@ -113,26 +113,38 @@ export function ScreenPage() {
       tavusAvatar.status === "ready" || tavusAvatar.status === "speaking";
   }, [tavusAvatar.status]);
 
-  // One-shot opener: spoken when both the avatar reaches `ready` AND the
-  // snapshot has loaded, so the audience hears the cloned voice and a
-  // hint of what to ask. Guarded by a ref so an avatar reconnect mid-
-  // session doesn't replay the greeting. The state-touching work is
-  // queued via `queueMicrotask` so it runs after the effect completes
-  // (React 19 forbids setState inside an effect's synchronous body).
+  // One-shot opener: spoken when both the avatar reaches `ready` AND
+  // the snapshot has loaded, so the audience hears the cloned voice
+  // and a hint of what to ask. Guarded by a ref so an avatar reconnect
+  // mid-session doesn't replay the greeting.
+  //
+  // Pulling the fields off `tavusAvatar` into local consts gives the
+  // exhaustive-deps lint specific identifiers to track — depending on
+  // the whole `tavusAvatar` object would re-run the effect on every
+  // render (the hook returns a fresh object reference each time).
+  //
+  // The `queueMicrotask` wrap defers the state-touching work past the
+  // effect's synchronous body so it doesn't trip React 19's
+  // `react-hooks/set-state-in-effect` lint rule. The transition from
+  // status:loading → status:ready is event-driven; the state update is
+  // a legitimate response to that transition. The microtask is a small
+  // accommodation, not architectural debt.
   const openingSpokenRef = useRef(false);
+  const tavusStatus = tavusAvatar.status;
+  const tavusEcho = tavusAvatar.echo;
   useEffect(() => {
     if (openingSpokenRef.current) return;
-    if (tavusAvatar.status !== "ready") return;
+    if (tavusStatus !== "ready") return;
     if (!screener.snapshot) return;
     openingSpokenRef.current = true;
     queueMicrotask(() => {
       const greeting = describeOpening();
       appendTranscript("assistant", greeting);
-      tavusAvatar.echo(greeting).catch((err) => {
+      tavusEcho(greeting).catch((err) => {
         console.warn("[screen] tavus opening echo failed:", err);
       });
     });
-  }, [tavusAvatar, screener.snapshot, appendTranscript]);
+  }, [tavusStatus, tavusEcho, screener.snapshot, appendTranscript]);
 
   /**
    * Append an assistant line to the transcript AND have Pep speak it
@@ -322,15 +334,25 @@ export function ScreenPage() {
    * route since we already know the fundId + category from the click.
    * Logs a synthetic user line into the transcript so the chat panel
    * shows the question that produced the answer.
+   *
+   * Gated on `isThinking` (which `handleIntent` toggles via the
+   * surrounding setIsThinking) so rapid double-clicks can't overlap
+   * echoes — the buttons render `disabled={isThinking}` to mirror.
    */
   const askAboutCategory = useCallback(
     async (fundId: FundId, category: CategoryId) => {
-      const fundName = getFundDisplayName(fundId);
-      const label = getCategoryLabel(category).toLowerCase();
-      appendTranscript("user", `Tell me about the ${fundName}'s ${label}.`);
-      await handleIntent({ kind: "info_fund_field", fundId, category });
+      if (isThinking) return;
+      setIsThinking(true);
+      try {
+        const fundName = getFundDisplayName(fundId);
+        const label = getCategoryLabel(category).toLowerCase();
+        appendTranscript("user", `Tell me about the ${fundName}'s ${label}.`);
+        await handleIntent({ kind: "info_fund_field", fundId, category });
+      } finally {
+        setIsThinking(false);
+      }
     },
-    [appendTranscript, handleIntent]
+    [isThinking, appendTranscript, handleIntent]
   );
 
   /** Send transcribed/typed text through the intent pipeline. */
@@ -625,35 +647,68 @@ export function ScreenPage() {
           )}
         </aside>
 
-        {/* Right pane: stocks table + conversation OR fund-info panel */}
+        {/* Right pane: header + mode-specific body + conversation pane.
+            ConversationPane is rendered ONCE per breakpoint at the
+            bottom of the section so the transcript array isn't iterated
+            twice on every update. */}
         <section className="flex flex-1 min-h-0 flex-col">
           {!isStarted ? (
             <div className="flex flex-1 items-center justify-center text-sm text-white/40">
               Press <span className="mx-1 font-medium text-white/70">Start Screening</span> to load the snapshot.
             </div>
-          ) : mode === "screening" ? (
+          ) : (
             <>
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
-                <span>
-                  Current stage:{" "}
-                  <span className="text-white">
-                    {screener.stages.at(-1)?.label ?? "—"}
-                  </span>{" "}
-                  · {screener.currentRows.length.toLocaleString()} rows
-                </span>
-                {enrichmentFailed > 0 ? (
-                  <span title="Securities with incomplete enrichment data" className="text-amber-300/80">
-                    {enrichmentFailed.toLocaleString()} with incomplete data
+              {mode === "screening" ? (
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
+                  <span>
+                    Current stage:{" "}
+                    <span className="text-white">
+                      {screener.stages.at(-1)?.label ?? "—"}
+                    </span>{" "}
+                    · {screener.currentRows.length.toLocaleString()} rows
                   </span>
-                ) : null}
-              </div>
+                  {enrichmentFailed > 0 ? (
+                    <span title="Securities with incomplete enrichment data" className="text-amber-300/80">
+                      {enrichmentFailed.toLocaleString()} with incomplete data
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
+                  <span>
+                    Active fund:{" "}
+                    <span className="text-white">{getFundDisplayName(activeFund)}</span>
+                  </span>
+                  <span className="text-white/40">
+                    Click a category to ask Pep, or use voice.
+                  </span>
+                </div>
+              )}
               <div className="flex flex-1 min-h-0">
-                <StocksTable
-                  rows={screener.currentRows}
-                  onTickerClick={setSelectedTicker}
-                  selectedTicker={selectedTicker}
-                  className="flex-1 min-h-0 flex flex-col"
-                />
+                {mode === "screening" ? (
+                  <StocksTable
+                    rows={screener.currentRows}
+                    onTickerClick={setSelectedTicker}
+                    selectedTicker={selectedTicker}
+                    className="flex-1 min-h-0 flex flex-col"
+                  />
+                ) : (
+                  <div className="flex-1 min-h-0 overflow-auto p-4">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {CATEGORY_IDS.map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => void askAboutCategory(activeFund, cat)}
+                          disabled={isThinking}
+                          className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50"
+                        >
+                          {getCategoryLabel(cat)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <ConversationPane
                   transcript={transcript}
                   isThinking={isThinking}
@@ -661,54 +716,13 @@ export function ScreenPage() {
                   className="hidden lg:flex flex-col w-[26rem] border-l border-white/10"
                 />
               </div>
-              {selectedTicker ? (
+              {mode === "screening" && selectedTicker ? (
                 <StockFactPanel
                   key={selectedTicker}
                   ticker={selectedTicker}
                   onClose={() => setSelectedTicker(null)}
                 />
               ) : null}
-              <ConversationPane
-                transcript={transcript}
-                isThinking={isThinking}
-                onAsk={ask}
-                className="lg:hidden flex flex-col h-[40svh] border-t border-white/10"
-              />
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
-                <span>
-                  Active fund:{" "}
-                  <span className="text-white">{getFundDisplayName(activeFund)}</span>
-                </span>
-                <span className="text-white/40">
-                  Click a category to ask Pep, or use voice.
-                </span>
-              </div>
-              <div className="flex flex-1 min-h-0">
-                <div className="flex-1 min-h-0 overflow-auto p-4">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {CATEGORY_IDS.map((cat) => (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => void askAboutCategory(activeFund, cat)}
-                        disabled={isThinking}
-                        className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50"
-                      >
-                        {getCategoryLabel(cat)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <ConversationPane
-                  transcript={transcript}
-                  isThinking={isThinking}
-                  onAsk={ask}
-                  className="hidden lg:flex flex-col w-[26rem] border-l border-white/10"
-                />
-              </div>
               <ConversationPane
                 transcript={transcript}
                 isThinking={isThinking}

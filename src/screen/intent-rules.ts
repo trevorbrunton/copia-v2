@@ -93,7 +93,13 @@ const CATEGORY_PATTERNS: Array<[RegExp, CategoryId]> = [
   ],
   [/\brisks?(?:\s+level|\s+profile)?\b|\bhow\s+risky\b|\bvolatility\b/i, "risk_level"],
   [
-    /\btarget\s+market\b|\bwho.*(?:suit|appropriate|suited\s+for)\b|\bright\s+for\b|\bwho\s+is\s+(?:it|this).*\s+for\b/i,
+    // `right for` only matches when followed by a fund-context noun
+    // (me, us, whom, investors) OR when it sits at the end of the
+    // utterance (e.g. "who is the small companies fund right for"). The
+    // bare `right for` was loose enough to match "the price is right
+    // for the market" — fine in fund context (gated by fund name in
+    // matchFundInfoRule) but cleaner to constrain at the source.
+    /\btarget\s+market\b|\bwho.*(?:suit|appropriate|suited\s+for)\b|\bright\s+for\s+(?:me|us|whom|investors?)\b|\bright\s+for\s*[.?!]?\s*$|\bwho\s+is\s+(?:it|this).*\s+for\b/i,
     "target_market",
   ],
   [
@@ -233,18 +239,16 @@ const RULES: Rule[] = [
     pattern: /\b(?:how\s+many|which)\b.*\b(?:portfolio|holdings?)\b.*\b(?:meet|still)/,
     build: () => ({ kind: "info_portfolio_overlap" }),
   },
+];
 
-  // ─── Fund Q&A (info_fund_field) ─────────────────────────────────
-  // Only fires when a fund name is present (mid-cap, micro-cap, premium
-  // small companies). Runs BEFORE the generic stock-fact patterns so
-  // "OC mid-cap fund's market cap" routes to fund-info, but AFTER the
-  // specific filter rules so "market cap > 50m" still hits Q1.
-  {
-    pattern: /\b(?:mid[\s-]?cap|micro[\s-]?cap|small[\s-]+(?:companies|cos?))\b/i,
-    build: matchFundInfoRule,
-  },
-
-  // ─── Stock-fact (info_stock_field) — runs after the funnel rules ─
+/**
+ * Rules that run AFTER the fund-info check. Generic patterns that
+ * could otherwise swallow a fund-qualified utterance (e.g. the bare
+ * "market cap" stock-fact rule shouldn't beat "OC mid-cap fund's
+ * market cap" → info_fund_field).
+ */
+const POST_FUND_INFO_RULES: Rule[] = [
+  // ─── Stock-fact (info_stock_field) ──────────────────────────────
   {
     pattern: /\b(?:share\s+price|trading\s+at|price\s+of|how\s+much\s+is)\b/,
     build: () => ({ kind: "info_stock_field", field: "share_price" }),
@@ -285,20 +289,32 @@ const RULES: Rule[] = [
   },
 ];
 
+/** Run a rule list, returning the first built Intent. */
+function runRules(text: string, rules: readonly Rule[]): Intent | null {
+  for (const rule of rules) {
+    if (!rule.pattern.test(text)) continue;
+    const built = rule.build(text);
+    if (built) return built;
+  }
+  return null;
+}
+
 /**
  * Try to match an utterance against the rule layer. Returns null if no
  * rule matches; the caller should fall back to the constrained classifier.
+ *
+ * Order: navigation/screen-shortcut/funnel/Q7/Q8 rules first, then
+ * fund-info (only fires when a fund name is present), then the generic
+ * stock-fact + output catch-alls. The fund-info call sits between the
+ * two halves so e.g. "OC mid-cap fund's market cap" routes to fund-info
+ * but "market cap above 50m" still hits the Q1 funnel rule.
  */
 export function matchIntentRule(utterance: string): Intent | null {
   const text = utterance.toLowerCase().trim();
   if (text.length === 0) return null;
-  for (const rule of RULES) {
-    if (!rule.pattern.test(text)) continue;
-    const built = rule.build(text);
-    if (built) return built;
-    // Pattern matched but deeper extraction declined (e.g. fund-info
-    // pattern hit but no fund name resolved on closer inspection) —
-    // continue checking remaining rules.
-  }
-  return null;
+  return (
+    runRules(text, RULES) ??
+    matchFundInfoRule(text) ??
+    runRules(text, POST_FUND_INFO_RULES)
+  );
 }

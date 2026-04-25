@@ -60,9 +60,12 @@ interface FundQaBank {
 
 const TYPED_BANK = bank as unknown as FundQaBank;
 
-// Module-load assertion — every fund must have every category, or we
-// throw before any request is served. Fail-loud beats silently
-// returning empty answers at narration time.
+// Module-load assertion — bidirectional. Fails loud at boot if either
+// side drifts: a TS-declared fund/category missing from the JSON, OR a
+// JSON-declared fund/category not reflected in the unions here. Both
+// directions matter because either silently breaks lookups: a missing
+// JSON entry would throw at narration time; an unknown JSON entry
+// would be unreachable from the matcher and never spoken.
 for (const fundId of FUND_IDS) {
   const fund = TYPED_BANK.funds[fundId];
   if (!fund) {
@@ -77,6 +80,27 @@ for (const fundId of FUND_IDS) {
 for (const cat of CATEGORY_IDS) {
   if (!TYPED_BANK.categoryLabels[cat]) {
     throw new Error(`fund-qa.json: missing categoryLabel for "${cat}"`);
+  }
+}
+for (const fundId of Object.keys(TYPED_BANK.funds)) {
+  if (!isFundId(fundId)) {
+    throw new Error(
+      `fund-qa.json: unknown fund "${fundId}" — add it to FUND_IDS in src/screen/fund-qa.ts`
+    );
+  }
+  for (const cat of Object.keys(TYPED_BANK.funds[fundId as FundId].answers)) {
+    if (!isCategoryId(cat)) {
+      throw new Error(
+        `fund-qa.json: ${fundId} has unknown category "${cat}" — add it to CATEGORY_IDS in src/screen/fund-qa.ts`
+      );
+    }
+  }
+}
+for (const cat of Object.keys(TYPED_BANK.categoryLabels)) {
+  if (!isCategoryId(cat)) {
+    throw new Error(
+      `fund-qa.json: unknown categoryLabel "${cat}" — add it to CATEGORY_IDS in src/screen/fund-qa.ts`
+    );
   }
 }
 
@@ -94,10 +118,6 @@ export function getFundAnswer(fundId: FundId, category: CategoryId): string {
 
 export function getFundDisplayName(fundId: FundId): string {
   return TYPED_BANK.funds[fundId].displayName;
-}
-
-export function getFundShortName(fundId: FundId): string {
-  return TYPED_BANK.funds[fundId].shortName;
 }
 
 export function getCategoryLabel(category: CategoryId): string {

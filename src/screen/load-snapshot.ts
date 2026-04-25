@@ -138,6 +138,20 @@ export function loadSnapshot(args: { importDir: string; curationPath: string }):
   const curatedUnproven = new Set(curation.is_unproven_or_complex_tech);
   const curatedSingleCommodity = new Set(curation.is_single_commodity_or_single_mine);
 
+  // Surface typos / stale tickers in curation early. A ticker that doesn't
+  // exist in the universe contributes nothing; warn loudly so the operator
+  // notices on the next ingest.
+  const universeTickers = new Set(universe.securities.map((u) => u.ticker));
+  const orphans: string[] = [];
+  for (const t of [...curatedUnproven, ...curatedSingleCommodity]) {
+    if (!universeTickers.has(t)) orphans.push(t);
+  }
+  if (orphans.length > 0) {
+    console.warn(
+      `[load-snapshot] WARNING: ${orphans.length} curation ticker(s) not present in the universe and will have no effect: ${orphans.join(", ")}`
+    );
+  }
+
   const rankedByTicker = new Map(ranked.securities.map((r) => [r.ticker, r]));
   const enrichedByTicker = new Map(enriched.securities.map((r) => [r.ticker, r]));
 

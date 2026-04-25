@@ -2,8 +2,8 @@
  * Pep avatar v2 — funnel filter engine.
  *
  * Pure functions over rows that satisfy `FilterableSecurity`. Both the
- * ingest script (in-memory `MergedRow`) and the future API route (Drizzle
- * `AsxSecurity`) consume these via the shared interface.
+ * ingest script (in-memory `MergedRow`) and the API route (Drizzle-loaded
+ * rows) consume these via the shared interface.
  *
  * See `docs/plans/pep-avatar-v2-plan.md` §4b for the canonical filter
  * sequences.
@@ -82,173 +82,11 @@ export type Stage = {
   label: string;
   count: number;
   tickers: string[];
+  /** ISO-8601 timestamp at which this stage was constructed. */
+  appliedAt: string;
 };
 
-// ─── Filter helpers ───────────────────────────────────────────
-
-/**
- * Profitability and cash-flow filters use a strict-true comparison.
- * Rows where `is_profitable === null` (i.e. we have no income data) are
- * **dropped** — we cannot assert profitability we did not measure.
- * Same applies to `is_cashflow_positive`.
- */
-function pushStage(
-  acc: Stage[],
-  rows: FilterableSecurity[],
-  id: StageId
-): FilterableSecurity[] {
-  acc.push({
-    id,
-    label: STAGE_LABELS[id],
-    count: rows.length,
-    tickers: rows.map((r) => r.ticker),
-  });
-  return rows;
-}
-
-// ─── Presets ──────────────────────────────────────────────────
-
-/**
- * Questionnaire preset — answers Pep's eight supplied demo questions.
- * 6 filter stages plus the `universe` baseline.
- *
- * Null-handling: stage 4 (profitable) drops rows where `is_profitable`
- * is null (no enrichment data). Stage 5 (unproven_tech) is currently a
- * no-op for v2 — the curated flag list is empty — but the stage is
- * still emitted so the funnel rail visibly advances.
- */
-export function applyQuestionnairePreset(rows: FilterableSecurity[]): Stage[] {
-  const stages: Stage[] = [];
-  let current = pushStage(stages, rows, STAGE_IDS.UNIVERSE);
-
-  // Q1: market cap > $50m
-  current = pushStage(
-    stages,
-    current.filter(
-      (r) =>
-        r.market_cap_snapshot !== null &&
-        r.market_cap_snapshot > FILTER_THRESHOLDS.MCAP_MIN_AUD
-    ),
-    STAGE_IDS.Q1_MCAP_50M
-  );
-
-  // Q2: top 100 by market cap
-  current = pushStage(
-    stages,
-    [...current]
-      .sort((a, b) => (b.market_cap_snapshot ?? 0) - (a.market_cap_snapshot ?? 0))
-      .slice(0, FILTER_THRESHOLDS.TOP_N_BY_MCAP),
-    STAGE_IDS.Q2_TOP_100
-  );
-
-  // Q3: turnover ≥ 20%
-  current = pushStage(
-    stages,
-    current.filter(
-      (r) =>
-        r.turnover_ratio_ttm !== null &&
-        r.turnover_ratio_ttm >= FILTER_THRESHOLDS.TURNOVER_LIQUIDITY
-    ),
-    STAGE_IDS.Q3_TURNOVER_20
-  );
-
-  // Q4: profitable (drops nulls — see function-level note)
-  current = pushStage(
-    stages,
-    current.filter((r) => r.is_profitable === true),
-    STAGE_IDS.Q4_PROFITABLE
-  );
-
-  // Q5: unproven_tech (no-op when curated list is empty; stage still emitted)
-  current = pushStage(
-    stages,
-    current.filter((r) => !r.is_unproven_or_complex_tech),
-    STAGE_IDS.Q5_UNPROVEN_TECH
-  );
-
-  // Q6: single_commodity
-  current = pushStage(
-    stages,
-    current.filter((r) => !r.is_single_commodity_or_single_mine),
-    STAGE_IDS.Q6_SINGLE_COMMODITY
-  );
-
-  return stages;
-}
-
-/**
- * Methodology preset — answers "run the OC initial screen" per the FSC
- * questionnaire's stated process. 7 filter stages plus universe.
- *
- * Null-handling: stages M2 / M3 drop rows where the corresponding flag
- * is null (no enrichment data) — we cannot claim profitability or
- * cash-flow positivity we didn't measure.
- */
-export function applyMethodologyPreset(rows: FilterableSecurity[]): Stage[] {
-  const stages: Stage[] = [];
-  let current = pushStage(stages, rows, STAGE_IDS.UNIVERSE);
-
-  // M1: mcap > $50m
-  current = pushStage(
-    stages,
-    current.filter(
-      (r) =>
-        r.market_cap_snapshot !== null &&
-        r.market_cap_snapshot > FILTER_THRESHOLDS.MCAP_MIN_AUD
-    ),
-    STAGE_IDS.M1_MCAP_50M
-  );
-
-  // M2: profitable
-  current = pushStage(
-    stages,
-    current.filter((r) => r.is_profitable === true),
-    STAGE_IDS.M2_PROFITABLE
-  );
-
-  // M3: cash-flow positive
-  current = pushStage(
-    stages,
-    current.filter((r) => r.is_cashflow_positive === true),
-    STAGE_IDS.M3_CASHFLOW_POSITIVE
-  );
-
-  // M4: exclude unproven tech
-  current = pushStage(
-    stages,
-    current.filter((r) => !r.is_unproven_or_complex_tech),
-    STAGE_IDS.M4_EXCLUDE_UNPROVEN_TECH
-  );
-
-  // M5: exclude single commodity
-  current = pushStage(
-    stages,
-    current.filter((r) => !r.is_single_commodity_or_single_mine),
-    STAGE_IDS.M5_EXCLUDE_SINGLE_COMMODITY
-  );
-
-  // M6: sufficient liquidity (same proxy as Questionnaire — §12 #1)
-  current = pushStage(
-    stages,
-    current.filter(
-      (r) =>
-        r.turnover_ratio_ttm !== null &&
-        r.turnover_ratio_ttm >= FILTER_THRESHOLDS.TURNOVER_LIQUIDITY
-    ),
-    STAGE_IDS.M6_SUFFICIENT_LIQUIDITY
-  );
-
-  // M7: exclude ASX 100
-  current = pushStage(
-    stages,
-    current.filter((r) => !r.is_asx_100),
-    STAGE_IDS.M7_EXCLUDE_ASX_100
-  );
-
-  return stages;
-}
-
-// ─── Per-filter step (used by the API route + the state machine) ──
+// ─── Per-filter step (single source of truth for each rule) ───
 
 export type FilterId = Exclude<StageId, "universe">;
 
@@ -274,9 +112,14 @@ export function isFilterId(id: string): id is FilterId {
 }
 
 /**
- * Apply a single filter to a row set. Used by the API route and the
- * client-side state machine. The Top-100 filter is special-cased
- * because it's a sort-and-take, not a row-level predicate.
+ * Apply a single filter to a row set. **Single source of truth** for
+ * each rule — the preset functions below compose this; the API route
+ * calls it directly. The Top-100 filter is special-cased because it's
+ * a sort-and-take, not a row-level predicate.
+ *
+ * Null-handling: profitability and cash-flow filters use a strict-true
+ * comparison. Rows with null are dropped because we cannot assert a
+ * fact we did not measure.
  */
 export function applyOneFilter(
   rows: FilterableSecurity[],
@@ -311,6 +154,77 @@ export function applyOneFilter(
     case STAGE_IDS.M7_EXCLUDE_ASX_100:
       return rows.filter((r) => !r.is_asx_100);
   }
+}
+
+// ─── Stage construction ───────────────────────────────────────
+
+/**
+ * Build a `Stage` from a row set. `appliedAt` defaults to "now"; tests
+ * that need deterministic timestamps can pass an explicit value.
+ */
+export function makeStage(
+  id: StageId,
+  rows: FilterableSecurity[],
+  appliedAt: string = new Date().toISOString()
+): Stage {
+  return {
+    id,
+    label: STAGE_LABELS[id],
+    count: rows.length,
+    tickers: rows.map((r) => r.ticker),
+    appliedAt,
+  };
+}
+
+// ─── Presets ──────────────────────────────────────────────────
+
+const QUESTIONNAIRE_FILTERS: FilterId[] = [
+  STAGE_IDS.Q1_MCAP_50M,
+  STAGE_IDS.Q2_TOP_100,
+  STAGE_IDS.Q3_TURNOVER_20,
+  STAGE_IDS.Q4_PROFITABLE,
+  STAGE_IDS.Q5_UNPROVEN_TECH,
+  STAGE_IDS.Q6_SINGLE_COMMODITY,
+];
+
+const METHODOLOGY_FILTERS: FilterId[] = [
+  STAGE_IDS.M1_MCAP_50M,
+  STAGE_IDS.M2_PROFITABLE,
+  STAGE_IDS.M3_CASHFLOW_POSITIVE,
+  STAGE_IDS.M4_EXCLUDE_UNPROVEN_TECH,
+  STAGE_IDS.M5_EXCLUDE_SINGLE_COMMODITY,
+  STAGE_IDS.M6_SUFFICIENT_LIQUIDITY,
+  STAGE_IDS.M7_EXCLUDE_ASX_100,
+];
+
+function applyPreset(rows: FilterableSecurity[], filters: FilterId[]): Stage[] {
+  const stages: Stage[] = [makeStage(STAGE_IDS.UNIVERSE, rows)];
+  let current = rows;
+  for (const f of filters) {
+    current = applyOneFilter(current, f);
+    stages.push(makeStage(f, current));
+  }
+  return stages;
+}
+
+/**
+ * Questionnaire preset — answers Pep's eight supplied demo questions.
+ * 6 filter stages plus the `universe` baseline.
+ *
+ * Q5 (unproven_tech) is currently a no-op for v2 — the curated flag
+ * list is empty — but the stage is still emitted so the funnel rail
+ * visibly advances.
+ */
+export function applyQuestionnairePreset(rows: FilterableSecurity[]): Stage[] {
+  return applyPreset(rows, QUESTIONNAIRE_FILTERS);
+}
+
+/**
+ * Methodology preset — answers "run the OC initial screen" per the FSC
+ * questionnaire's stated process. 7 filter stages plus universe.
+ */
+export function applyMethodologyPreset(rows: FilterableSecurity[]): Stage[] {
+  return applyPreset(rows, METHODOLOGY_FILTERS);
 }
 
 // ─── Snapshot-level derivation ────────────────────────────────

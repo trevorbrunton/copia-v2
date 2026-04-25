@@ -5,12 +5,11 @@ import { logger } from "@/src/lib/logger";
 import { db } from "@/src/db";
 import { asxSnapshots, asxSecurities } from "@/src/db/screen-schema";
 import {
-  STAGE_LABELS,
   applyOneFilter,
   isFilterId,
+  makeStage,
   type FilterId,
   type FilterableSecurity,
-  type Stage,
 } from "@/src/screen/funnel";
 
 /**
@@ -34,6 +33,17 @@ const BodySchema = z.object({
   fromTickers: z.array(z.string()).optional(),
 });
 
+/**
+ * Strict numeric coercion. Drizzle returns Postgres `numeric` columns
+ * as strings; we parse to JS number. Returns null on null/undefined
+ * input or any value that isn't a finite number — never NaN.
+ */
+function parseNumeric(v: string | number | null): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function POST(req: Request) {
   const traceId = crypto.randomUUID();
   try {
@@ -44,6 +54,8 @@ export async function POST(req: Request) {
     };
 
     // 1. Resolve active snapshot (MAX(collected_at)) — see plan §6b.
+    //    Tiebreak on id so two snapshots inserted in the same second
+    //    still resolve deterministically.
     const [active] = await db
       .select({
         id: asxSnapshots.id,
@@ -51,7 +63,7 @@ export async function POST(req: Request) {
         collectedAt: asxSnapshots.collectedAt,
       })
       .from(asxSnapshots)
-      .orderBy(desc(asxSnapshots.collectedAt))
+      .orderBy(desc(asxSnapshots.collectedAt), desc(asxSnapshots.id))
       .limit(1);
 
     if (!active) {
@@ -78,12 +90,14 @@ export async function POST(req: Request) {
       .from(asxSecurities)
       .where(where);
 
-    // Drizzle returns numeric columns as strings (jsonb-friendly Postgres
-    // numeric handling). Coerce to numbers so the filter engine works.
+    // Drizzle returns Postgres `numeric` columns as strings. Coerce to
+    // JS numbers via a strict parser that returns null on anything that
+    // isn't a finite number (never NaN, which would silently affect filter
+    // results).
     const rows: FilterableSecurity[] = rawRows.map((r) => ({
       ticker: r.ticker,
-      market_cap_snapshot: r.market_cap_snapshot === null ? null : Number(r.market_cap_snapshot),
-      turnover_ratio_ttm: r.turnover_ratio_ttm === null ? null : Number(r.turnover_ratio_ttm),
+      market_cap_snapshot: parseNumeric(r.market_cap_snapshot),
+      turnover_ratio_ttm: parseNumeric(r.turnover_ratio_ttm),
       is_profitable: r.is_profitable,
       is_cashflow_positive: r.is_cashflow_positive,
       is_asx_100: !!r.is_asx_100,
@@ -96,15 +110,9 @@ export async function POST(req: Request) {
       "screen:apply-filter"
     );
 
-    // 3. Apply the filter.
+    // 3. Apply the filter and build the resulting stage.
     const filtered = applyOneFilter(rows, filterId);
-
-    const stage: Stage = {
-      id: filterId,
-      label: STAGE_LABELS[filterId],
-      count: filtered.length,
-      tickers: filtered.map((r) => r.ticker),
-    };
+    const stage = makeStage(filterId, filtered);
 
     return Response.json({
       stage,

@@ -211,6 +211,25 @@ describe("applyFilterToState", () => {
     expect(s0.current).toBe(currentBefore);
     expect(s0.stages).toHaveLength(1);
   });
+
+  it("handles an empty `current.tickers` set without crashing", () => {
+    // Synthetic state where the previous stage filtered everything out.
+    const s0 = initScreenState(SNAPSHOT, rows);
+    let s = applyFilterToState(s0, "q1_mcap_50m", rows);
+    // Pretend an upstream filter produced an empty current stage.
+    s = { ...s, current: { ...s.current, tickers: [], count: 0 } };
+    const next = applyFilterToState(s, "q3_turnover_20", rows);
+    expect(next.current.count).toBe(0);
+    expect(next.current.tickers).toEqual([]);
+    expect(next.stages.at(-1)).toBe(next.current);
+  });
+
+  it("each new Stage has an ISO-8601 appliedAt timestamp", () => {
+    const s = applyFilterToState(initScreenState(SNAPSHOT, rows), "q1_mcap_50m", rows);
+    expect(s.current.appliedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    // Each stage should have its own timestamp.
+    expect(s.stages[0].appliedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
 });
 
 describe("resetScreenState", () => {

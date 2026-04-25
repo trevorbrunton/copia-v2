@@ -12,8 +12,8 @@
  */
 import {
   STAGE_IDS,
-  STAGE_LABELS,
   applyOneFilter,
+  makeStage,
   type FilterId,
   type FilterableSecurity,
   type Stage,
@@ -33,18 +33,9 @@ export type ScreenState = {
   current: Stage;
 };
 
-function makeUniverseStage(rows: FilterableSecurity[]): Stage {
-  return {
-    id: STAGE_IDS.UNIVERSE,
-    label: STAGE_LABELS[STAGE_IDS.UNIVERSE],
-    count: rows.length,
-    tickers: rows.map((r) => r.ticker),
-  };
-}
-
 /** Initialize state with the universe stage containing all rows. */
 export function initScreenState(snapshot: Snapshot, allRows: FilterableSecurity[]): ScreenState {
-  const universe = makeUniverseStage(allRows);
+  const universe = makeStage(STAGE_IDS.UNIVERSE, allRows);
   return {
     snapshot,
     stages: [universe],
@@ -54,12 +45,7 @@ export function initScreenState(snapshot: Snapshot, allRows: FilterableSecurity[
 
 /** Reset state to the universe stage. Snapshot is preserved. */
 export function resetScreenState(state: ScreenState, allRows: FilterableSecurity[]): ScreenState {
-  const universe = makeUniverseStage(allRows);
-  return {
-    snapshot: state.snapshot,
-    stages: [universe],
-    current: universe,
-  };
+  return initScreenState(state.snapshot, allRows);
 }
 
 /**
@@ -76,13 +62,7 @@ export function applyFilterToState(
   const currentTickers = new Set(state.current.tickers);
   const inputRows = allRows.filter((r) => currentTickers.has(r.ticker));
   const outputRows = applyOneFilter(inputRows, filterId);
-
-  const newStage: Stage = {
-    id: filterId,
-    label: STAGE_LABELS[filterId],
-    count: outputRows.length,
-    tickers: outputRows.map((r) => r.ticker),
-  };
+  const newStage = makeStage(filterId, outputRows);
 
   return {
     snapshot: state.snapshot,

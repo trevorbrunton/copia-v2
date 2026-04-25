@@ -11,7 +11,7 @@
 |---|---|---|
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
-| 3. UI and state | ✓ Complete | `a0cce22` (initial), `<phase-3-review>` (review fixes) |
+| 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | Not started | — |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |

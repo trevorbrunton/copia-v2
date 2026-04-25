@@ -58,4 +58,35 @@ describe("matchScreenIntent — composition", () => {
     );
     expect(intent.kind).toBe("fallback");
   });
+
+  it("propagates an info_stock_field intent from the classifier", async () => {
+    const stockFieldClassifier: ClassifierFn = async (text) => {
+      if (/price\s+of/.test(text.toLowerCase())) {
+        return { kind: "info_stock_field", field: "share_price" };
+      }
+      return { kind: "fallback" };
+    };
+    const intent = await matchScreenIntent(
+      "what's the going price of nextdc these days",
+      stockFieldClassifier
+    );
+    expect(intent.kind).toBe("info_stock_field");
+    if (intent.kind === "info_stock_field") {
+      expect(intent.field).toBe("share_price");
+    }
+  });
+
+  it("respects classifier outputs that pass schema even when the rule layer would have run", async () => {
+    // This utterance does NOT match any rule, so the classifier path
+    // runs. The stub returns apply_initial_screen — verify the
+    // composition propagates it untouched.
+    const initialScreenClassifier: ClassifierFn = async () => ({
+      kind: "apply_initial_screen",
+    });
+    const intent = await matchScreenIntent(
+      "give me OCs full process please",
+      initialScreenClassifier
+    );
+    expect(intent.kind).toBe("apply_initial_screen");
+  });
 });

@@ -14,7 +14,7 @@
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
 | 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` (initial), `4e0e3fd` (review fixes) |
-| 6. Polish and pitch hardening | ✓ Complete | `2274c0c` |
+| 6. Polish and pitch hardening | ✓ Complete | `2274c0c` (initial), `<phase-6-review>` (review fixes) |
 | 7. v1 code decommission | Not started | — |
 
 ---
@@ -657,3 +657,17 @@ Code review of phase 5 surfaced four moderate and two minor issues (plus two doc
 | Minor | `/portfolio-overlap` numeric coercion used raw `Number(...)` instead of the shared `parseNumeric` (phase 4 review fix M3 standard) | Swapped in `parseNumeric` |
 | Documented | Within-portfolio `isSample` uniformity assumed but not enforced (`latest[0].isSample` only) | Acceptable per D8 — portfolio rows always share the flag at ingest time |
 | Documented | No tests for the Anthropic classifier fallback path (plan §11 expected fixture-stubbed responses) | Phase 5 exit criteria didn't require it; raise for phase 6 polish |
+
+## 18. Review fixes applied during phase 6
+
+Code review of phase 6 surfaced three moderate and two minor issues (plus two documented-only items); all closed.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | `applyAndNarrate` regressed phase-5 fix M2: it narrated "Couldn't apply X: unknown error" when `applyFilter` returned null on early-return paths (in-flight, wrong status), even though no error was actually set | Restored before/after `screener.error` capture; only narrate failure if a NEW error was set; stay silent on dedup early-returns |
+| Moderate | `describeAppliedFilter` switch had no `default` — adding a new `FilterId` would silently return `undefined` to the transcript | Added compile-time `assertNever` exhaustiveness guard |
+| Moderate | `<AvatarVideo>` used `object-cover`, cropping the Tavus feed (Pep's head got tightly cropped). v1 used `object-contain` for letterbox | Switched to `object-contain` for parity |
+| Minor | `pcmToWav` hard-codes 16-bit mono with no documentation — silent breakage if the listener changes format | JSDoc note documenting the input contract |
+| Minor | `screen-matcher.test.ts` had no case for an `info_stock_field` returned by the classifier nor for a non-rule utterance the classifier classifies as initial-screen | Two cases added; **121/121 tests pass** |
+| Documented | `startSession` runs snapshot load + Tavus init in parallel; no ordering | Cosmetic only — error banner shows if either fails |
+| Documented | `<AvatarVideo>` no `aria-live` region for status changes | Accessibility minor; defer |

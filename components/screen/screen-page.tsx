@@ -112,19 +112,29 @@ export function ScreenPage() {
   );
 
   /**
-   * Apply a filter and narrate the outcome (success counts via the
-   * narration templates; failure as a plain error line).
+   * Apply a filter and narrate the outcome.
+   *
+   * `applyFilter` returns null both on real failures AND on early-return
+   * paths (in-flight, wrong status, no current stage). To distinguish
+   * "didn't run" from "ran and failed" we capture `screener.error`
+   * before the call and only narrate failure if a NEW error was set.
    */
   const applyAndNarrate = useCallback(
     async (filterId: FilterId): Promise<boolean> => {
       const prevCount = screener.stages.at(-1)?.count ?? 0;
+      const errBefore = screener.error;
       const stage = await screener.applyFilter(filterId);
-      if (!stage) {
-        narrate(describeAppliedFilterFailure(filterId, screener.error ?? "unknown error"));
+      if (stage) {
+        narrate(describeAppliedFilter(filterId, stage.count, prevCount));
+        return true;
+      }
+      const errAfter = screener.error;
+      if (errAfter && errAfter !== errBefore) {
+        narrate(describeAppliedFilterFailure(filterId, errAfter));
         return false;
       }
-      narrate(describeAppliedFilter(filterId, stage.count, prevCount));
-      return true;
+      // Early-return path (e.g. duplicate click while applying). Stay silent.
+      return false;
     },
     [screener, narrate]
   );

@@ -11,8 +11,13 @@ import { logger } from "@/src/lib/logger";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? "";
 
 /**
- * Wrap raw PCM Int16 LE samples in a minimal WAV header so the STT
- * service identifies the format correctly.
+ * Wrap raw PCM samples in a minimal WAV header so the STT service
+ * identifies the format correctly.
+ *
+ * **Input contract:** `pcm` must be **16-bit signed little-endian
+ * mono** (matches what `useVoiceListener` emits today). The header is
+ * hard-coded for that format. If the listener ever switches to a
+ * different bit depth or channel count, this helper needs updating.
  */
 function pcmToWav(pcm: ArrayBuffer, sampleRate: number): ArrayBuffer {
   const pcmBytes = new Uint8Array(pcm);

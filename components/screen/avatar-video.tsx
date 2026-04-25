@@ -61,7 +61,9 @@ export function AvatarVideo({ mediaStream, status, error, className }: AvatarVid
         ref={videoRef}
         autoPlay
         playsInline
-        className="absolute inset-0 h-full w-full object-cover bg-[var(--oc-dark)]"
+        // object-contain matches v1's AvatarPanel — letterbox the Tavus
+        // feed rather than crop Pep's head.
+        className="absolute inset-0 h-full w-full object-contain bg-[var(--oc-dark)]"
       />
     </div>
   );

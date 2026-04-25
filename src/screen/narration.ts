@@ -8,10 +8,20 @@
  */
 import type { FilterId, Stage } from "@/src/screen/funnel";
 
+/** Compile-time exhaustiveness guard. Throws if a new FilterId was added without a case. */
+function assertNever(x: never): never {
+  throw new Error(`describeAppliedFilter: unhandled FilterId ${String(x)}`);
+}
+
 /**
  * Narration for a successfully-applied filter. `count` is the number
  * of stocks remaining after the filter; `prevCount` is what was there
  * before (used to phrase Q5's "no change" outcome).
+ *
+ * Adding a new `FilterId` without a case here will fail to typecheck
+ * via `assertNever` — the compile-time guard makes the narration
+ * surface the canonical error rather than silently returning
+ * `undefined` to the transcript.
  */
 export function describeAppliedFilter(filterId: FilterId, count: number, prevCount: number): string {
   const c = count.toLocaleString();
@@ -40,6 +50,8 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
       return `${c} stocks remain after excluding single-commodity / single-mine names — based on a curated reference list.`;
     case "m7_exclude_asx_100":
       return `${c} stocks remain after excluding the ASX 100 names. This is the OC initial screen.`;
+    default:
+      return assertNever(filterId);
   }
 }
 

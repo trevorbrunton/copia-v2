@@ -1,9 +1,21 @@
 # Pep Avatar v2 - OC Screening Demo
 
-**Status:** revised draft aligned to the brief
+**Status:** in build — phase 1 ✓ complete
 **Audience:** OC fund managers / analysts; internal productisation pitch
 **Primary route:** `/demo/screen`
 **Persona:** existing Tavus Custom Pep persona, with Generic still selectable
+
+## Implementation status
+
+| Phase | Status | Commits |
+|---|---|---|
+| 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (post-review fixes) |
+| 2. Screening engine | In progress | — |
+| 3. UI and state | Not started | — |
+| 4. Stock-fact provider (snapshot-backed) | Not started | — |
+| 5. Voice and routing | Not started | — |
+| 6. Polish and pitch hardening | Not started | — |
+| 7. v1 code decommission | Not started | — |
 
 ---
 
@@ -373,18 +385,26 @@ The revised plan is only done when all of the following are true:
 
 ## 10. Delivery phases
 
-### Phase 1 - schema, ingest, reconciliation
+### Phase 1 - schema, ingest, reconciliation ✓ COMPLETE
 
-1. Add `src/db/screen-schema.ts` with the three new tables.
-2. Update `drizzle.config.ts` to register both schema files.
-3. Run `bun run db:generate`. **Manually verify** the produced SQL contains only `CREATE TABLE` statements for the three new tables — no `DROP TABLE` against `demo_responses` or `demo_question_patterns`. If any DROP statements are emitted, hand-edit them out before applying.
-4. Apply the migration via `bun scripts/run-migration.ts <new-migration-file>`.
-5. Commit `tests/screen/expected-preset-counts.json` with the expected per-stage counts derived from the snapshot (Questionnaire: 1979 → 487 → 100 → 86 → 79 → 79 → 65; Methodology: TBD after first ingest dry-run).
-6. Add `data/curation.json` with the 14 curated single-commodity tickers and an empty unproven-tech list.
-7. Write `scripts/ingest-asx-snapshot.ts` (idempotent upsert; emits the reconciliation summary defined in §5b; exits non-zero if counts drift from the fixture).
-8. Run the ingest. Confirm v1 demo at `/demo` still loads and answers correctly.
+**Commits:** `c670dd4` (initial); `3e220bb` (review fixes — see §13).
 
-**Exit criteria:** DB populated; reconciliation report at `data/reports/ingest-2026-04-24.json` checked in; expected-counts fixture passes; v1 demo unaffected.
+1. ✓ Added `src/db/screen-schema.ts` with the three new tables.
+2. ✓ Updated `drizzle.config.ts` to register both schema files.
+3. ✓ Hand-wrote `src/db/migrations/005_screen_schema.sql` (drizzle-kit's journal isn't maintained in this repo; existing migrations follow the same hand-written pattern). Verified the SQL contains only `CREATE TABLE` against the three new tables — no `DROP` against v1 entities.
+4. ✓ Applied via `bun scripts/run-migration.ts src/db/migrations/005_screen_schema.sql`.
+5. ✓ Committed `tests/screen/expected-preset-counts.json` baselined from the live snapshot. Re-baselining now requires `bun scripts/ingest-asx-snapshot.ts --baseline` (silent regeneration was a critical-severity issue closed in `3e220bb`).
+6. ✓ Added `data/curation.json` with the 14 curated single-commodity tickers; unproven-tech list empty for v2.
+7. ✓ Wrote `scripts/ingest-asx-snapshot.ts`. Idempotent (snapshot delete-then-insert + securities upsert). Validates fixture **before** writing to DB, so a regression doesn't poison Supabase.
+8. ✓ Lifted preset filter functions + thresholds + stage IDs out of the script into `src/screen/funnel.ts` (review fix M1) so phase 2's API route can import them cleanly.
+9. ✓ Confirmed v1 demo at `/demo` still serves a 200 (24ms cold).
+
+**Actual reconciliation against the 2026-04-24 snapshot:**
+- Universe 1,979 (enrichment ok=493, partial=1324, failed=162).
+- **Questionnaire preset:** 1979 → 940 → 100 → 86 → 79 → 79 → **65**.
+- **Methodology preset:** 1979 → 940 → 347 → 283 → 283 → 271 → 218 → **159**.
+
+> **Drift from Pep's brief examples:** Pep's "around 500 stocks above $50m" example translates to **940** in the actual snapshot because the source ranked-light data covers 1,840 stocks (not just top 500). The avatar will speak the live count, not the brief's estimate.
 
 ### Phase 2 - screening engine
 
@@ -497,3 +517,18 @@ All previously-open decisions have been resolved by the client:
 **Locked by D1 / D2:** v1 code is removed from this repo in phase 7; v1 Supabase tables are preserved untouched so the separate v1 app keeps functioning.
 
 A separate **assumptions document** (`docs/plans/pep-avatar-v2-assumptions.md`) captures the same set of decisions in plain language for client review.
+
+---
+
+## 13. Review fixes applied during phase 1
+
+Code review of phase 1 surfaced two critical issues and four moderate ones; all closed in commit `3e220bb`.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Critical | Silent fixture re-baselining defeated drift detection | Missing fixture now exits 2; re-baselining requires explicit `--baseline` flag |
+| Critical | DB write happened before fixture validation; a regression could poison Supabase | Reordered to compute → validate → persist; DB stays untouched on drift |
+| Moderate | Preset filter logic lived in `scripts/`, but phase 2's API route needs it | Lifted to `src/screen/funnel.ts` with a `FilterableSecurity` interface both in-memory `MergedRow` and Drizzle's `AsxSecurity` satisfy structurally |
+| Moderate | Magic thresholds (50_000_000, 0.20, 100) repeated | `FILTER_THRESHOLDS` named constants exported from `funnel.ts` |
+| Moderate | Stage IDs scattered as bare string literals across two functions and the fixture | `STAGE_IDS` const + `StageId` type + `STAGE_LABELS` map; one source of truth |
+| Moderate | Strict-true comparison on profitability filters drops null-enrichment rows undocumented | JSDoc on both presets explains the null-handling semantics |

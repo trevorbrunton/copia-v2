@@ -51,29 +51,38 @@ interface AudioEchoPayload {
  */
 async function sendAudioEcho(
   call: DailyCall,
+  conversationId: string | null,
   { audio, sampleRate, inferenceId }: AudioEchoPayload,
   signal: AbortSignal
 ): Promise<void> {
   const total = audio.length;
   const rawBytesPerChunk = Math.floor(AUDIO_ECHO_CHUNK_BASE64_CHARS * 0.75);
   const chunkAudioMs = (rawBytesPerChunk / 2 / sampleRate) * 1000;
+  // Pace at slightly faster than playback so Tavus has a small buffer
+  // ahead, without bursting (which we observed breaking playback).
   const interChunkDelayMs = Math.max(40, Math.floor(chunkAudioMs * 0.8));
 
   for (let offset = 0; offset < total; offset += AUDIO_ECHO_CHUNK_BASE64_CHARS) {
     if (signal.aborted) return;
     const chunk = audio.slice(offset, offset + AUDIO_ECHO_CHUNK_BASE64_CHARS);
     const isLast = offset + AUDIO_ECHO_CHUNK_BASE64_CHARS >= total;
+    // Schema verified against novacatai/novacat (working production
+    // implementation) and aws-samples/sample-voice-ai-tavus-avatar-demo:
+    // - `done` is a JSON boolean (NOT the string "true"/"false")
+    // - `conversation_id` belongs at the top level of the message
+    // - `sample_rate` is optional; Tavus uses the persona's configured
+    //   rate when absent. We pass it because the skill file shows it.
     call.sendAppMessage(
       {
         message_type: "conversation",
         event_type: "conversation.echo",
+        ...(conversationId && { conversation_id: conversationId }),
         properties: {
           modality: "audio",
           audio: chunk,
           sample_rate: sampleRate,
           inference_id: inferenceId,
-          // Tavus expects strings, not booleans.
-          done: isLast ? "true" : "false",
+          done: isLast,
         },
       },
       "*"
@@ -296,6 +305,11 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
           const data = evt?.data;
           if (!data) return;
           const eventType: string = data.event_type ?? data.type ?? "";
+          // Diagnostic: log every CVI event so the next time playback
+          // misbehaves, the actual event stream is in the console.
+          if (eventType.startsWith("conversation.")) {
+            console.log("[tavus] event:", eventType, data?.properties ?? {});
+          }
           const isSpeechEnd =
             eventType.includes("utterance_end") ||
             eventType.includes("echo_end") ||
@@ -305,7 +319,7 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
           const ours = currentInferenceIdRef.current;
           const eventInferenceId: string | undefined =
-            data?.properties?.inference_id;
+            data?.properties?.inference_id ?? data?.inference_id;
           if (ours && eventInferenceId && eventInferenceId !== ours) {
             // Stale: speech-end belongs to an earlier (or unrelated) utterance.
             return;
@@ -449,12 +463,20 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
 
       try {
         setStatus("speaking");
+        const convId = conversationIdRef.current;
         if (audioPayload) {
           currentInferenceIdRef.current = audioPayload.inferenceId;
+          console.log(
+            "[tavus] Audio Echo:",
+            audioPayload.audio.length,
+            "base64 chars,",
+            "inference_id=" + audioPayload.inferenceId,
+            "fallback=" + fallbackMs + "ms"
+          );
           // Fire-and-forget — chunks pace themselves at ~80% audio
           // rate. Errors are non-fatal: even partial delivery may
           // produce some speech, and the fallback covers full silence.
-          void sendAudioEcho(call, audioPayload, audioAbort.signal).catch((err) => {
+          void sendAudioEcho(call, convId, audioPayload, audioAbort.signal).catch((err) => {
             console.warn("[tavus] sendAudioEcho failed mid-stream:", err);
           });
         } else {
@@ -466,7 +488,8 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
             {
               message_type: "conversation",
               event_type: "conversation.echo",
-              properties: { modality: "text", text },
+              ...(convId && { conversation_id: convId }),
+              properties: { modality: "text", text, done: true },
             },
             "*"
           );
@@ -489,12 +512,14 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
   const interrupt = useCallback(() => {
     const call = callRef.current;
     if (!call) return;
+    const convId = conversationIdRef.current;
 
     try {
       call.sendAppMessage(
         {
           message_type: "conversation",
           event_type: "conversation.interrupt",
+          ...(convId && { conversation_id: convId }),
         },
         "*"
       );

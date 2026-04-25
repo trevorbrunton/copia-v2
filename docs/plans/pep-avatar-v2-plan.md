@@ -9,8 +9,8 @@
 
 | Phase | Status | Commits |
 |---|---|---|
-| 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (post-review fixes) |
-| 2. Screening engine | In progress | — |
+| 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
+| 2. Screening engine | ✓ Complete | (this commit) |
 | 3. UI and state | Not started | — |
 | 4. Stock-fact provider (snapshot-backed) | Not started | — |
 | 5. Voice and routing | Not started | — |
@@ -406,14 +406,26 @@ The revised plan is only done when all of the following are true:
 
 > **Drift from Pep's brief examples:** Pep's "around 500 stocks above $50m" example translates to **940** in the actual snapshot because the source ranked-light data covers 1,840 stocks (not just top 500). The avatar will speak the live count, not the brief's estimate.
 
-### Phase 2 - screening engine
+### Phase 2 - screening engine ✓ COMPLETE
 
-1. **Write tests first** (`tests/screen/filters.test.ts`): apply each preset's filter sequence against the ingested snapshot, assert per-stage counts match the fixture.
-2. Implement filter engine + preset runner in `src/screen/funnel.ts`.
-3. Add `tests/screen/funnel-state.test.ts` for `ScreenState` transitions (synthetic state, fire intents, assert resulting state).
-4. Build `POST /api/v1/screen/apply-filter` (inline route pattern per D2).
+1. ✓ Lifted snapshot-loading logic out of the ingest script into `src/screen/load-snapshot.ts` so the test suite and the script share one source of truth.
+2. ✓ Wrote `tests/screen/filters.test.ts` (16 cases): per-stage count match against the fixture, monotonicity, ticker-subset invariant, plus targeted checks (Q5 no-op, Q6 single-commodity removals, M2 / M7 row-level invariants, loader sanity).
+3. ✓ Added per-filter step `applyOneFilter(rows, filterId)` + `FilterId` type + `isFilterId` guard in `src/screen/funnel.ts`.
+4. ✓ Built `src/screen/state.ts`: `ScreenState`, `initScreenState`, `applyFilterToState`, `resetScreenState` — pure reducers, no DB.
+5. ✓ Wrote `tests/screen/funnel-state.test.ts` (11 cases): hand-crafted 7-row fixture, drives state through all 13 filter IDs, asserts immutability, ticker subset, top-100 ordering, M7 ASX-100 exclusion.
+6. ✓ Built `POST /api/v1/screen/apply-filter` (inline route, no auth, no UoW per D2): Zod-validated body, picks active snapshot via `MAX(collected_at)`, optionally scopes to `fromTickers` via `inArray`, applies the filter, returns `{ stage, snapshot }`. GET → 405.
+7. ✓ Wired both schema files into the Drizzle client (`src/db/index.ts` now imports `schema-v1` + `screen-schema`).
 
-**Exit criteria:** snapshot-only screening works via the route without voice or avatar; both presets pass count tests.
+**Smoke test against the live snapshot:**
+- Q1 from universe: count 940, top tickers ALC/ATA/AR1/ATM/AON.
+- Q2 from Q1 result: count 100, top 3 by mcap CBA/BHP/RIO.
+- Full Questionnaire chain end-to-end: 940 → 100 → 86 → 79 → 79 → 65 (matches fixture).
+- Bad filterId → 400 with VALIDATION_ERROR + traceId.
+- Missing body → 400. GET → 405.
+
+**Test totals:** 27/27 passing in 230ms.
+
+**Exit criteria:** ✓ snapshot-only screening works via the route without voice or avatar; both presets pass count tests.
 
 ### Phase 3 - UI and state
 

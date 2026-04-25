@@ -44,10 +44,9 @@ import { resolve, join, dirname } from "path";
 import {
   applyMethodologyPreset,
   applyQuestionnairePreset,
-  topNByMcapTickers,
-  type FilterableSecurity,
   type Stage,
 } from "@/src/screen/funnel";
+import { loadSnapshot, type MergedRow } from "@/src/screen/load-snapshot";
 
 // ─── Configuration ─────────────────────────────────────────
 
@@ -76,162 +75,14 @@ const SAMPLE_HOLDINGS = [
 const SAMPLE_PORTFOLIO_LABEL = "OC Premium Small Company Fund (sample)";
 const SAMPLE_AS_OF = "2025-12-31";
 
-// ─── Source-row types (loose — JSON shapes vary across files) ───
-
-type UniverseRow = { ticker: string; company_name: string; gics_industry_group?: string };
-type RankedLightRow = UniverseRow & {
-  market_cap?: number; close_price?: number; currency?: string;
-  shares_outstanding?: number; volume_latest?: number;
-  avg_volume_252d?: number; total_volume_252d?: number;
-  turnover_ratio_ttm?: number;
-};
-type TopEnrichedRow = RankedLightRow & {
-  gics_sub_industry?: string; sector?: string;
-  eps_ttm?: number; net_income_ttm?: number; free_cash_flow_ttm?: number;
-  long_business_summary?: string;
-};
-type Curation = {
-  is_unproven_or_complex_tech: string[];
-  is_single_commodity_or_single_mine: string[];
-};
-
-type DataQuality = {
-  enrichment_status: "ok" | "partial" | "failed";
-  missing_fields: string[];
-};
-
-// ─── Merged row used during ingest ─────────────────────────
-
-type MergedRow = FilterableSecurity & {
-  company_name: string;
-  sector: string | null;
-  gics_industry_group: string | null;
-  gics_sub_industry: string | null;
-  close_price_snapshot: number | null;
-  shares_outstanding: number | null;
-  volume_latest: number | null;
-  avg_volume_252d: number | null;
-  total_volume_252d: number | null;
-  eps_ttm: number | null;
-  net_income_ttm: number | null;
-  free_cash_flow_ttm: number | null;
-  long_business_summary: string | null;
-  earnings_status_snapshot: string;
-  data_quality: DataQuality;
-};
-
 // ─── Helpers ───────────────────────────────────────────────
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf-8")) as T;
 }
 
-/**
- * Source JSONs use the string "N/A" as a sentinel for missing values in
- * fields that are otherwise numeric or text. Coerce to null so DB inserts
- * don't blow up on numeric columns.
- */
-function clean<T>(v: T): T | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "string" && (v === "N/A" || v === "NaN" || v === "")) return null;
-  return v;
-}
-function num(v: unknown): number | null {
-  const c = clean(v);
-  if (c === null) return null;
-  const n = typeof c === "number" ? c : Number(c);
-  return Number.isFinite(n) ? n : null;
-}
-function str(v: unknown): string | null {
-  const c = clean(v);
-  return c === null ? null : String(c);
-}
-
-function deriveEarningsStatus(netIncomeTtm: number | null): string {
-  if (netIncomeTtm === null || netIncomeTtm === undefined) return "Insufficient data";
-  return netIncomeTtm > 0 ? "Profitable (TTM)" : "Unprofitable (TTM)";
-}
-
-function classifyEnrichment(row: MergedRow): DataQuality {
-  const required = {
-    market_cap_snapshot: row.market_cap_snapshot,
-    turnover_ratio_ttm: row.turnover_ratio_ttm,
-    net_income_ttm: row.net_income_ttm,
-  };
-  const missing = Object.entries(required)
-    .filter(([, v]) => v === null || v === undefined)
-    .map(([k]) => k);
-  if (missing.length === 0) return { enrichment_status: "ok", missing_fields: [] };
-  if (missing.length === 3) return { enrichment_status: "failed", missing_fields: missing };
-  return { enrichment_status: "partial", missing_fields: missing };
-}
-
 function stagesToFixtureShape(stages: Stage[]): { stage: string; count: number }[] {
   return stages.map(({ id, count }) => ({ stage: id, count }));
-}
-
-// ─── Steps ─────────────────────────────────────────────────
-
-function buildMergedRows(): MergedRow[] {
-  console.log(`[ingest] Reading from ${IMPORT_DIR}`);
-  const universe = readJson<{ securities: UniverseRow[]; collected_at: string }>(
-    join(IMPORT_DIR, "asx_universe.json")
-  );
-  const ranked = readJson<{ securities: RankedLightRow[]; snapshot_date: string; collected_at: string }>(
-    join(IMPORT_DIR, "asx_ranked_light.json")
-  );
-  const enriched = readJson<{ securities: TopEnrichedRow[] }>(
-    join(IMPORT_DIR, "asx_top500_enriched.json")
-  );
-  const curation = readJson<Curation>(CURATION_PATH);
-
-  const curatedUnproven = new Set(curation.is_unproven_or_complex_tech);
-  const curatedSingleCommodity = new Set(curation.is_single_commodity_or_single_mine);
-
-  const rankedByTicker = new Map(ranked.securities.map((r) => [r.ticker, r]));
-  const enrichedByTicker = new Map(enriched.securities.map((r) => [r.ticker, r]));
-
-  // Universe defines membership — every ticker becomes a row.
-  // Source JSONs sometimes use "N/A" / empty string as sentinels: num()/str() coerce to null.
-  const merged: MergedRow[] = universe.securities.map((u) => {
-    const r = rankedByTicker.get(u.ticker);
-    const e = enrichedByTicker.get(u.ticker);
-    const netIncome = num(e?.net_income_ttm);
-    const fcf = num(e?.free_cash_flow_ttm);
-    const row: MergedRow = {
-      ticker: u.ticker,
-      company_name: u.company_name,
-      sector: str(e?.sector),
-      gics_industry_group: str(u.gics_industry_group ?? r?.gics_industry_group),
-      gics_sub_industry: str(e?.gics_sub_industry),
-      market_cap_snapshot: num(r?.market_cap),
-      close_price_snapshot: num(r?.close_price),
-      shares_outstanding: num(r?.shares_outstanding),
-      volume_latest: num(r?.volume_latest),
-      avg_volume_252d: num(r?.avg_volume_252d),
-      total_volume_252d: num(r?.total_volume_252d),
-      turnover_ratio_ttm: num(r?.turnover_ratio_ttm),
-      eps_ttm: num(e?.eps_ttm),
-      net_income_ttm: netIncome,
-      free_cash_flow_ttm: fcf,
-      long_business_summary: str(e?.long_business_summary),
-      earnings_status_snapshot: deriveEarningsStatus(netIncome),
-      is_profitable: netIncome === null ? null : netIncome > 0,
-      is_cashflow_positive: fcf === null ? null : fcf > 0,
-      is_asx_100: false, // computed below from the snapshot's own top-100 ranking
-      is_unproven_or_complex_tech: curatedUnproven.has(u.ticker),
-      is_single_commodity_or_single_mine: curatedSingleCommodity.has(u.ticker),
-      data_quality: { enrichment_status: "failed", missing_fields: [] },
-    };
-    row.data_quality = classifyEnrichment(row);
-    return row;
-  });
-
-  // Stamp is_asx_100 from the snapshot's own top-N by market cap.
-  const top100 = topNByMcapTickers(merged);
-  for (const r of merged) r.is_asx_100 = top100.has(r.ticker);
-
-  return merged;
 }
 
 function buildReport(merged: MergedRow[], snapshotDate: string, collectedAt: string) {
@@ -504,13 +355,11 @@ async function main() {
   const baseline = args.has("--baseline");
 
   // 1. Load + derive in memory
-  const merged = buildMergedRows();
+  console.log(`[ingest] Reading from ${IMPORT_DIR}`);
+  const { snapshot, rows: merged } = loadSnapshot({ importDir: IMPORT_DIR, curationPath: CURATION_PATH });
 
   // 2. Build report (applies both presets)
-  const ranked = readJson<{ snapshot_date: string; collected_at: string }>(
-    join(IMPORT_DIR, "asx_ranked_light.json")
-  );
-  const report = buildReport(merged, ranked.snapshot_date, ranked.collected_at);
+  const report = buildReport(merged, snapshot.snapshot_date, snapshot.collected_at);
   printSummary(report);
 
   // 3. Validate against fixture (or baseline) BEFORE touching the DB

@@ -248,6 +248,71 @@ export function applyMethodologyPreset(rows: FilterableSecurity[]): Stage[] {
   return stages;
 }
 
+// ─── Per-filter step (used by the API route + the state machine) ──
+
+export type FilterId = Exclude<StageId, "universe">;
+
+const STAGE_TO_FILTER_ID: Record<StageId, FilterId | null> = {
+  universe: null,
+  q1_mcap_50m: "q1_mcap_50m",
+  q2_top_100: "q2_top_100",
+  q3_turnover_20: "q3_turnover_20",
+  q4_profitable: "q4_profitable",
+  q5_unproven_tech: "q5_unproven_tech",
+  q6_single_commodity: "q6_single_commodity",
+  m1_mcap_50m: "m1_mcap_50m",
+  m2_profitable: "m2_profitable",
+  m3_cashflow_positive: "m3_cashflow_positive",
+  m4_exclude_unproven_tech: "m4_exclude_unproven_tech",
+  m5_exclude_single_commodity: "m5_exclude_single_commodity",
+  m6_sufficient_liquidity: "m6_sufficient_liquidity",
+  m7_exclude_asx_100: "m7_exclude_asx_100",
+};
+
+export function isFilterId(id: string): id is FilterId {
+  return id in STAGE_TO_FILTER_ID && STAGE_TO_FILTER_ID[id as StageId] !== null;
+}
+
+/**
+ * Apply a single filter to a row set. Used by the API route and the
+ * client-side state machine. The Top-100 filter is special-cased
+ * because it's a sort-and-take, not a row-level predicate.
+ */
+export function applyOneFilter(
+  rows: FilterableSecurity[],
+  filterId: FilterId
+): FilterableSecurity[] {
+  switch (filterId) {
+    case STAGE_IDS.Q1_MCAP_50M:
+    case STAGE_IDS.M1_MCAP_50M:
+      return rows.filter(
+        (r) => r.market_cap_snapshot !== null && r.market_cap_snapshot > FILTER_THRESHOLDS.MCAP_MIN_AUD
+      );
+    case STAGE_IDS.Q2_TOP_100:
+      return [...rows]
+        .sort((a, b) => (b.market_cap_snapshot ?? 0) - (a.market_cap_snapshot ?? 0))
+        .slice(0, FILTER_THRESHOLDS.TOP_N_BY_MCAP);
+    case STAGE_IDS.Q3_TURNOVER_20:
+    case STAGE_IDS.M6_SUFFICIENT_LIQUIDITY:
+      return rows.filter(
+        (r) => r.turnover_ratio_ttm !== null && r.turnover_ratio_ttm >= FILTER_THRESHOLDS.TURNOVER_LIQUIDITY
+      );
+    case STAGE_IDS.Q4_PROFITABLE:
+    case STAGE_IDS.M2_PROFITABLE:
+      return rows.filter((r) => r.is_profitable === true);
+    case STAGE_IDS.M3_CASHFLOW_POSITIVE:
+      return rows.filter((r) => r.is_cashflow_positive === true);
+    case STAGE_IDS.Q5_UNPROVEN_TECH:
+    case STAGE_IDS.M4_EXCLUDE_UNPROVEN_TECH:
+      return rows.filter((r) => !r.is_unproven_or_complex_tech);
+    case STAGE_IDS.Q6_SINGLE_COMMODITY:
+    case STAGE_IDS.M5_EXCLUDE_SINGLE_COMMODITY:
+      return rows.filter((r) => !r.is_single_commodity_or_single_mine);
+    case STAGE_IDS.M7_EXCLUDE_ASX_100:
+      return rows.filter((r) => !r.is_asx_100);
+  }
+}
+
 // ─── Snapshot-level derivation ────────────────────────────────
 
 /**

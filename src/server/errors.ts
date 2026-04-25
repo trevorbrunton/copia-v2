@@ -54,22 +54,33 @@ export class ExternalServiceError extends AppError {
   }
 }
 
+export class TooManyRequestsError extends AppError {
+  constructor(message = "Too many requests", public readonly retryAfterSec?: number) {
+    super(message, "RATE_LIMITED", 429);
+    this.name = "TooManyRequestsError";
+  }
+}
+
 /**
  * Map an unknown error to an HTTP Response with a standardized error envelope.
  * When traceId is provided, it's included in the error response for client-side correlation.
  */
 export function handleAppError(err: unknown, traceId?: string): Response {
   if (err instanceof AppError) {
-    return Response.json(
-      {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    if (err instanceof TooManyRequestsError && err.retryAfterSec) {
+      headers.set("Retry-After", String(err.retryAfterSec));
+    }
+    return new Response(
+      JSON.stringify({
         error: {
           code: err.code,
           message: err.message,
           details: err.details,
           ...(traceId && { traceId }),
         },
-      },
-      { status: err.status }
+      }),
+      { status: err.status, headers }
     );
   }
 

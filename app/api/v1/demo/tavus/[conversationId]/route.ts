@@ -1,6 +1,15 @@
 import { handleAppError } from "@/src/server/errors";
 import { ExternalServiceError } from "@/src/server/errors";
 import { logger } from "@/src/lib/logger";
+import { checkRateLimit } from "@/src/server/rate-limit";
+import { getClientIp } from "@/src/lib/api-response";
+
+// DELETE is cheap (one outbound call to Tavus to stop billing) but is
+// still an unauthenticated route. Bound it loosely.
+const RATE_LIMITS = [
+  { limit: 30, windowMs: 60_000 },        // 30 / minute
+  { limit: 100, windowMs: 60 * 60_000 },  // 100 / hour
+] as const;
 
 /**
  * DELETE /api/v1/demo/tavus/[conversationId]
@@ -9,11 +18,12 @@ import { logger } from "@/src/lib/logger";
  * Intentionally unauthenticated — powers the public investor demo page.
  */
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
   const traceId = crypto.randomUUID();
   try {
+    checkRateLimit(`demo:tavus:delete:${getClientIp(req)}`, RATE_LIMITS);
     const { conversationId } = await params;
 
     const apiKey = process.env.TAVUS_API_KEY;

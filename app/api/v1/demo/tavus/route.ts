@@ -1,6 +1,16 @@
 import { handleAppError } from "@/src/server/errors";
 import { ExternalServiceError } from "@/src/server/errors";
 import { logger } from "@/src/lib/logger";
+import { checkRateLimit } from "@/src/server/rate-limit";
+import { getClientIp } from "@/src/lib/api-response";
+
+// Tavus conversations cost real money per session — be aggressive here.
+// One pitch session creates a single conversation, so legit usage stays
+// well below these caps.
+const RATE_LIMITS = [
+  { limit: 5, windowMs: 60_000 },         // 5 / minute
+  { limit: 20, windowMs: 60 * 60_000 },   // 20 / hour
+] as const;
 
 /**
  * POST /api/v1/demo/tavus
@@ -12,6 +22,8 @@ import { logger } from "@/src/lib/logger";
 export async function POST(req: Request) {
   const traceId = crypto.randomUUID();
   try {
+    checkRateLimit(`demo:tavus:create:${getClientIp(req)}`, RATE_LIMITS);
+
     const apiKey = process.env.TAVUS_API_KEY;
     if (!apiKey) {
       throw new ExternalServiceError(

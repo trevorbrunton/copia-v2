@@ -5,6 +5,8 @@ import { matchScreenIntent } from "@/src/screen/screen-matcher";
 import { EntityResolver } from "@/src/screen/entity-resolver";
 import { transcribePcm } from "@/src/screen/stt";
 import type { Intent } from "@/src/screen/intent";
+import { checkRateLimit } from "@/src/server/rate-limit";
+import { getClientIp } from "@/src/lib/api-response";
 
 /**
  * POST /api/v1/screen/process
@@ -33,6 +35,13 @@ const JsonBodySchema = z.object({
 const entityResolver = new EntityResolver();
 
 const MAX_AUDIO_BYTES = 10_000_000;
+
+// Caps third-party spend (ElevenLabs STT + Anthropic) per anonymous IP.
+// A pitch session is well under these limits; abuse hits the wall fast.
+const RATE_LIMITS = [
+  { limit: 30, windowMs: 60_000 },        // 30 / minute
+  { limit: 200, windowMs: 60 * 60_000 },  // 200 / hour
+] as const;
 
 async function readUtteranceText(req: Request, traceId: string): Promise<string> {
   const contentType = req.headers.get("content-type") ?? "";
@@ -67,6 +76,7 @@ async function readUtteranceText(req: Request, traceId: string): Promise<string>
 export async function POST(req: Request) {
   const traceId = crypto.randomUUID();
   try {
+    checkRateLimit(`screen:process:${getClientIp(req)}`, RATE_LIMITS);
     const text = await readUtteranceText(req, traceId);
 
     if (!text) {

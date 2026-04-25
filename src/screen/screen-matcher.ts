@@ -96,7 +96,9 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: text }],
     }),
-    signal: AbortSignal.timeout(15_000),
+    // Voice loop budget is tight — fail fast and let the caller fall
+    // back to `{ kind: "fallback" }` rather than block on a slow API.
+    signal: AbortSignal.timeout(5_000),
   });
 
   if (!res.ok) {

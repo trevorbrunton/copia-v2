@@ -74,7 +74,9 @@ export async function transcribePcm(args: {
     method: "POST",
     headers: { "xi-api-key": ELEVENLABS_API_KEY },
     body,
-    signal: AbortSignal.timeout(30_000),
+    // Pitch-demo budget — a 30s hung STT call would freeze the whole
+    // voice loop. Fail fast and let the caller surface a retry.
+    signal: AbortSignal.timeout(12_000),
   });
 
   if (!res.ok) {

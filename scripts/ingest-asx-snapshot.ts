@@ -7,23 +7,47 @@
  *   - $ASX_IMPORT_DIR/asx_top500_enriched.json  (top 500: + eps, net_income, fcf, sector)
  *   - data/curation.json                        (hand-curated boolean flags)
  *
+ * Run order:
+ *   1. Load JSONs and build the in-memory merged row set.
+ *   2. Compute derived flags + apply both presets in memory.
+ *   3. Validate the resulting per-stage counts against the committed
+ *      fixture (`tests/screen/expected-preset-counts.json`). If drift is
+ *      detected, exit non-zero **before** touching the database.
+ *   4. Persist to DB (snapshot + securities + sample holdings) idempotently.
+ *   5. Write the reconciliation report.
+ *
  * Writes:
- *   - asx_snapshots (one new row)
+ *   - asx_snapshots (replaces prior row for the same date+source)
  *   - asx_securities (upsert keyed on snapshot_id + ticker)
- *   - oc_holdings (sample portfolio for Q8 — fixed seed)
- *   - data/reports/ingest-{snapshot_date}.json (reconciliation summary)
+ *   - oc_holdings (upsert — sample portfolio for Q8)
+ *   - data/reports/ingest-{snapshot_date}.json (audit trail)
+ *
+ * Flags:
+ *   --baseline  Create or overwrite the fixture from the current run's
+ *               counts. Use this only when the snapshot or filter rules
+ *               have intentionally changed and the new counts have been
+ *               manually verified.
  *
  * Exit codes:
- *   0 = success and counts match tests/screen/expected-preset-counts.json
- *   1 = ingest succeeded but counts drifted from the fixture
+ *   0 = success and counts match fixture
+ *   1 = counts drifted from fixture (DB NOT updated)
  *   2 = ingest failed
  *
- * Usage:  bun scripts/ingest-asx-snapshot.ts
- *         ASX_IMPORT_DIR=~/asx bun scripts/ingest-asx-snapshot.ts
+ * Usage:
+ *   bun scripts/ingest-asx-snapshot.ts
+ *   bun scripts/ingest-asx-snapshot.ts --baseline
+ *   ASX_IMPORT_DIR=~/asx bun scripts/ingest-asx-snapshot.ts
  */
 import postgres from "postgres";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, join, dirname } from "path";
+import {
+  applyMethodologyPreset,
+  applyQuestionnairePreset,
+  topNByMcapTickers,
+  type FilterableSecurity,
+  type Stage,
+} from "@/src/screen/funnel";
 
 // ─── Configuration ─────────────────────────────────────────
 
@@ -34,6 +58,8 @@ const IMPORT_DIR = process.env.ASX_IMPORT_DIR
 const FIXTURE_PATH = resolve("tests/screen/expected-preset-counts.json");
 const REPORT_DIR = resolve("data/reports");
 const CURATION_PATH = resolve("data/curation.json");
+
+const SOURCE_LABEL = "merged_universe+ranked+enriched";
 
 const SAMPLE_HOLDINGS = [
   { ticker: "MIN", weight: 6.30, mv: 8428900, firstBought: "2025-05-31", shareChg: 0.00, oneYr: 225.67, fwdPe: 14.64, sector: "Basic Materials" },
@@ -69,35 +95,29 @@ type Curation = {
   is_single_commodity_or_single_mine: string[];
 };
 
+type DataQuality = {
+  enrichment_status: "ok" | "partial" | "failed";
+  missing_fields: string[];
+};
+
 // ─── Merged row used during ingest ─────────────────────────
 
-type MergedRow = {
-  ticker: string;
+type MergedRow = FilterableSecurity & {
   company_name: string;
   sector: string | null;
   gics_industry_group: string | null;
   gics_sub_industry: string | null;
-  market_cap_snapshot: number | null;
   close_price_snapshot: number | null;
   shares_outstanding: number | null;
   volume_latest: number | null;
   avg_volume_252d: number | null;
   total_volume_252d: number | null;
-  turnover_ratio_ttm: number | null;
   eps_ttm: number | null;
   net_income_ttm: number | null;
   free_cash_flow_ttm: number | null;
   long_business_summary: string | null;
-  // Derived
   earnings_status_snapshot: string;
-  is_profitable: boolean | null;
-  is_cashflow_positive: boolean | null;
-  is_asx_100: boolean;
-  // Curated
-  is_unproven_or_complex_tech: boolean;
-  is_single_commodity_or_single_mine: boolean;
-  // Provenance
-  data_quality: { enrichment_status: "ok" | "partial" | "failed"; missing_fields: string[] };
+  data_quality: DataQuality;
 };
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -132,7 +152,7 @@ function deriveEarningsStatus(netIncomeTtm: number | null): string {
   return netIncomeTtm > 0 ? "Profitable (TTM)" : "Unprofitable (TTM)";
 }
 
-function classifyEnrichment(row: MergedRow): { enrichment_status: "ok" | "partial" | "failed"; missing_fields: string[] } {
+function classifyEnrichment(row: MergedRow): DataQuality {
   const required = {
     market_cap_snapshot: row.market_cap_snapshot,
     turnover_ratio_ttm: row.turnover_ratio_ttm,
@@ -146,85 +166,13 @@ function classifyEnrichment(row: MergedRow): { enrichment_status: "ok" | "partia
   return { enrichment_status: "partial", missing_fields: missing };
 }
 
-// ─── Filter sequences (mirror §4b of the plan) ─────────────
-
-function applyQuestionnairePreset(rows: MergedRow[]): { stage: string; count: number; tickers: string[] }[] {
-  const stages: { stage: string; count: number; tickers: string[] }[] = [];
-  let current = rows;
-  stages.push({ stage: "universe", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 1. mcap > 50m
-  current = current.filter((r) => r.market_cap_snapshot !== null && r.market_cap_snapshot > 50_000_000);
-  stages.push({ stage: "q1_mcap_50m", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 2. top 100 by mcap
-  current = [...current].sort((a, b) => (b.market_cap_snapshot ?? 0) - (a.market_cap_snapshot ?? 0)).slice(0, 100);
-  stages.push({ stage: "q2_top_100", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 3. turnover ≥ 20%
-  current = current.filter((r) => r.turnover_ratio_ttm !== null && r.turnover_ratio_ttm >= 0.20);
-  stages.push({ stage: "q3_turnover_20", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 4. profitable
-  current = current.filter((r) => r.is_profitable === true);
-  stages.push({ stage: "q4_profitable", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 5. unproven_tech (no-op when curation list is empty)
-  current = current.filter((r) => !r.is_unproven_or_complex_tech);
-  stages.push({ stage: "q5_unproven_tech", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 6. single_commodity
-  current = current.filter((r) => !r.is_single_commodity_or_single_mine);
-  stages.push({ stage: "q6_single_commodity", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  return stages;
+function stagesToFixtureShape(stages: Stage[]): { stage: string; count: number }[] {
+  return stages.map(({ id, count }) => ({ stage: id, count }));
 }
 
-function applyMethodologyPreset(rows: MergedRow[]): { stage: string; count: number; tickers: string[] }[] {
-  const stages: { stage: string; count: number; tickers: string[] }[] = [];
-  let current = rows;
-  stages.push({ stage: "universe", count: current.length, tickers: current.map((r) => r.ticker) });
+// ─── Steps ─────────────────────────────────────────────────
 
-  // 1. mcap > 50m
-  current = current.filter((r) => r.market_cap_snapshot !== null && r.market_cap_snapshot > 50_000_000);
-  stages.push({ stage: "m1_mcap_50m", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 2. profitable
-  current = current.filter((r) => r.is_profitable === true);
-  stages.push({ stage: "m2_profitable", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 3. cash-flow positive
-  current = current.filter((r) => r.is_cashflow_positive === true);
-  stages.push({ stage: "m3_cashflow_positive", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 4. exclude unproven tech
-  current = current.filter((r) => !r.is_unproven_or_complex_tech);
-  stages.push({ stage: "m4_exclude_unproven_tech", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 5. exclude single commodity
-  current = current.filter((r) => !r.is_single_commodity_or_single_mine);
-  stages.push({ stage: "m5_exclude_single_commodity", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 6. sufficient liquidity (same proxy as questionnaire — see §12 #1)
-  current = current.filter((r) => r.turnover_ratio_ttm !== null && r.turnover_ratio_ttm >= 0.20);
-  stages.push({ stage: "m6_sufficient_liquidity", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  // 7. exclude ASX 100 (top 100 of the snapshot by mcap, computed once at row level)
-  current = current.filter((r) => !r.is_asx_100);
-  stages.push({ stage: "m7_exclude_asx_100", count: current.length, tickers: current.map((r) => r.ticker) });
-
-  return stages;
-}
-
-// ─── Main ingest ───────────────────────────────────────────
-
-async function main() {
-  const databaseUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("✗ DIRECT_URL or DATABASE_URL must be set");
-    process.exit(2);
-  }
-
+function buildMergedRows(): MergedRow[] {
   console.log(`[ingest] Reading from ${IMPORT_DIR}`);
   const universe = readJson<{ securities: UniverseRow[]; collected_at: string }>(
     join(IMPORT_DIR, "asx_universe.json")
@@ -240,12 +188,11 @@ async function main() {
   const curatedUnproven = new Set(curation.is_unproven_or_complex_tech);
   const curatedSingleCommodity = new Set(curation.is_single_commodity_or_single_mine);
 
-  // Index ranked-light + enriched by ticker
   const rankedByTicker = new Map(ranked.securities.map((r) => [r.ticker, r]));
   const enrichedByTicker = new Map(enriched.securities.map((r) => [r.ticker, r]));
 
-  // Build the merged row set (universe defines membership). Source JSONs
-  // sometimes use "N/A" / empty string as sentinels — normalise via num()/str().
+  // Universe defines membership — every ticker becomes a row.
+  // Source JSONs sometimes use "N/A" / empty string as sentinels: num()/str() coerce to null.
   const merged: MergedRow[] = universe.securities.map((u) => {
     const r = rankedByTicker.get(u.ticker);
     const e = enrichedByTicker.get(u.ticker);
@@ -271,7 +218,7 @@ async function main() {
       earnings_status_snapshot: deriveEarningsStatus(netIncome),
       is_profitable: netIncome === null ? null : netIncome > 0,
       is_cashflow_positive: fcf === null ? null : fcf > 0,
-      is_asx_100: false, // computed below
+      is_asx_100: false, // computed below from the snapshot's own top-100 ranking
       is_unproven_or_complex_tech: curatedUnproven.has(u.ticker),
       is_single_commodity_or_single_mine: curatedSingleCommodity.has(u.ticker),
       data_quality: { enrichment_status: "failed", missing_fields: [] },
@@ -280,21 +227,17 @@ async function main() {
     return row;
   });
 
-  // Compute is_asx_100 (top 100 of this snapshot by market cap, NULLS LAST)
-  const top100Tickers = new Set(
-    [...merged]
-      .filter((r) => r.market_cap_snapshot !== null)
-      .sort((a, b) => (b.market_cap_snapshot ?? 0) - (a.market_cap_snapshot ?? 0))
-      .slice(0, 100)
-      .map((r) => r.ticker)
-  );
-  for (const r of merged) r.is_asx_100 = top100Tickers.has(r.ticker);
+  // Stamp is_asx_100 from the snapshot's own top-N by market cap.
+  const top100 = topNByMcapTickers(merged);
+  for (const r of merged) r.is_asx_100 = top100.has(r.ticker);
 
-  // Apply both presets and capture stage counts
+  return merged;
+}
+
+function buildReport(merged: MergedRow[], snapshotDate: string, collectedAt: string) {
   const questionnaireStages = applyQuestionnairePreset(merged);
   const methodologyStages = applyMethodologyPreset(merged);
 
-  // Reconciliation summary
   const enrichmentBreakdown = {
     ok: merged.filter((r) => r.data_quality.enrichment_status === "ok").length,
     partial: merged.filter((r) => r.data_quality.enrichment_status === "partial").length,
@@ -310,42 +253,120 @@ async function main() {
     ).length,
   };
 
-  const snapshotDate = ranked.snapshot_date;
-  const collectedAt = ranked.collected_at;
-  const report = {
+  return {
     snapshot_date: snapshotDate,
     collected_at: collectedAt,
     universe_size: merged.length,
     enrichment_breakdown: enrichmentBreakdown,
     flag_breakdown: flagBreakdown,
-    questionnaire_preset: questionnaireStages.map(({ stage, count }) => ({ stage, count })),
-    methodology_preset: methodologyStages.map(({ stage, count }) => ({ stage, count })),
+    questionnaire_preset: stagesToFixtureShape(questionnaireStages),
+    methodology_preset: stagesToFixtureShape(methodologyStages),
     questionnaire_final_tickers: questionnaireStages[questionnaireStages.length - 1].tickers,
     methodology_final_tickers: methodologyStages[methodologyStages.length - 1].tickers,
   };
+}
 
-  // Write reconciliation report
-  if (!existsSync(REPORT_DIR)) mkdirSync(REPORT_DIR, { recursive: true });
-  const reportPath = join(REPORT_DIR, `ingest-${snapshotDate}.json`);
-  writeFileSync(reportPath, JSON.stringify(report, null, 2));
-  console.log(`\n[ingest] Reconciliation report written to ${reportPath}`);
-
-  // Print to stdout
+function printSummary(report: ReturnType<typeof buildReport>) {
   console.log("\n=== Reconciliation summary ===");
-  console.log(`  Snapshot date:   ${snapshotDate}`);
-  console.log(`  Collected at:    ${collectedAt}`);
-  console.log(`  Universe size:   ${merged.length}`);
-  console.log(`  Enrichment:      ok=${enrichmentBreakdown.ok}, partial=${enrichmentBreakdown.partial}, failed=${enrichmentBreakdown.failed}`);
-  console.log(`  Profitable:      ${flagBreakdown.is_profitable_true}`);
-  console.log(`  Cashflow +ve:    ${flagBreakdown.is_cashflow_positive_true}`);
-  console.log(`  ASX 100:         ${flagBreakdown.is_asx_100_true}`);
-  console.log(`  Single-cmdty:    ${flagBreakdown.is_single_commodity_or_single_mine_true}`);
+  console.log(`  Snapshot date:   ${report.snapshot_date}`);
+  console.log(`  Collected at:    ${report.collected_at}`);
+  console.log(`  Universe size:   ${report.universe_size}`);
+  console.log(
+    `  Enrichment:      ok=${report.enrichment_breakdown.ok}, ` +
+      `partial=${report.enrichment_breakdown.partial}, ` +
+      `failed=${report.enrichment_breakdown.failed}`
+  );
+  console.log(`  Profitable:      ${report.flag_breakdown.is_profitable_true}`);
+  console.log(`  Cashflow +ve:    ${report.flag_breakdown.is_cashflow_positive_true}`);
+  console.log(`  ASX 100:         ${report.flag_breakdown.is_asx_100_true}`);
+  console.log(
+    `  Single-cmdty:    ${report.flag_breakdown.is_single_commodity_or_single_mine_true}`
+  );
   console.log("\n  Questionnaire preset stages:");
-  for (const s of questionnaireStages) console.log(`    ${s.stage.padEnd(28)} ${s.count}`);
+  for (const s of report.questionnaire_preset) console.log(`    ${s.stage.padEnd(28)} ${s.count}`);
   console.log("\n  Methodology preset stages:");
-  for (const s of methodologyStages) console.log(`    ${s.stage.padEnd(28)} ${s.count}`);
+  for (const s of report.methodology_preset) console.log(`    ${s.stage.padEnd(28)} ${s.count}`);
+}
 
-  // ─── Persist to DB ─────────────────────────────────────
+/**
+ * Validate report counts against the committed fixture. Returns true if
+ * the fixture was used (drift detection ran), false if the user explicitly
+ * baselined a new fixture. Exits the process on drift or on a missing
+ * fixture without --baseline.
+ */
+function validateOrBaseline(
+  report: ReturnType<typeof buildReport>,
+  options: { baseline: boolean }
+): void {
+  if (options.baseline) {
+    if (!existsSync(dirname(FIXTURE_PATH))) mkdirSync(dirname(FIXTURE_PATH), { recursive: true });
+    writeFileSync(
+      FIXTURE_PATH,
+      JSON.stringify(
+        {
+          _comment:
+            "Expected per-stage counts for the v2 demo presets. Update only when the snapshot or filter rules intentionally change. Re-baseline with `bun scripts/ingest-asx-snapshot.ts --baseline`.",
+          snapshot_date: report.snapshot_date,
+          questionnaire_preset: report.questionnaire_preset,
+          methodology_preset: report.methodology_preset,
+        },
+        null,
+        2
+      ) + "\n"
+    );
+    console.log(`✓ Fixture written to ${FIXTURE_PATH}`);
+    return;
+  }
+
+  if (!existsSync(FIXTURE_PATH)) {
+    console.error(
+      `\n✗ Fixture not found at ${FIXTURE_PATH}.\n` +
+        `  This file is required to detect count drift. To create it from\n` +
+        `  the current run, re-run with the --baseline flag:\n\n` +
+        `    bun scripts/ingest-asx-snapshot.ts --baseline\n`
+    );
+    process.exit(2);
+  }
+
+  const fixture = readJson<{
+    questionnaire_preset: { stage: string; count: number }[];
+    methodology_preset: { stage: string; count: number }[];
+  }>(FIXTURE_PATH);
+
+  const drift: string[] = [];
+  for (const expected of fixture.questionnaire_preset) {
+    const actual = report.questionnaire_preset.find((s) => s.stage === expected.stage);
+    if (!actual || actual.count !== expected.count) {
+      drift.push(
+        `questionnaire/${expected.stage}: expected ${expected.count}, got ${actual?.count ?? "MISSING"}`
+      );
+    }
+  }
+  for (const expected of fixture.methodology_preset) {
+    const actual = report.methodology_preset.find((s) => s.stage === expected.stage);
+    if (!actual || actual.count !== expected.count) {
+      drift.push(
+        `methodology/${expected.stage}: expected ${expected.count}, got ${actual?.count ?? "MISSING"}`
+      );
+    }
+  }
+
+  if (drift.length > 0) {
+    console.error(`\n✗ Count drift detected vs ${FIXTURE_PATH}:`);
+    for (const d of drift) console.error(`    ${d}`);
+    console.error(
+      `\nDB was NOT updated. If this drift is intentional (snapshot or rules\n` +
+        `changed), re-run with --baseline after manually verifying the new counts.`
+    );
+    process.exit(1);
+  }
+
+  console.log(`\n✓ All preset counts match fixture (${FIXTURE_PATH}).`);
+}
+
+async function persist(merged: MergedRow[], snapshotDate: string, collectedAt: string) {
+  const databaseUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DIRECT_URL or DATABASE_URL must be set");
 
   console.log(`\n[ingest] Connecting to database…`);
   const sql = postgres(databaseUrl, { prepare: false });
@@ -353,23 +374,28 @@ async function main() {
   try {
     // Idempotent: drop any prior snapshot for the same (date, source) so
     // re-runs replace cleanly. CASCADE drops dependent asx_securities rows.
-    const sourceLabel = "merged_universe+ranked+enriched";
     const deleted = await sql<{ id: string }[]>`
       DELETE FROM asx_snapshots
-      WHERE snapshot_date = ${snapshotDate} AND source = ${sourceLabel}
+      WHERE snapshot_date = ${snapshotDate} AND source = ${SOURCE_LABEL}
       RETURNING id
     `;
     if (deleted.length > 0) {
       console.log(`[ingest] Replaced ${deleted.length} prior snapshot row(s) for ${snapshotDate}`);
     }
+
     const [snapshot] = await sql<{ id: string }[]>`
       INSERT INTO asx_snapshots (snapshot_date, collected_at, source, stock_count, notes)
-      VALUES (${snapshotDate}, ${collectedAt}, ${sourceLabel}, ${merged.length}, ${`Generated by scripts/ingest-asx-snapshot.ts on ${new Date().toISOString()}`})
+      VALUES (
+        ${snapshotDate},
+        ${collectedAt},
+        ${SOURCE_LABEL},
+        ${merged.length},
+        ${`Generated by scripts/ingest-asx-snapshot.ts on ${new Date().toISOString()}`}
+      )
       RETURNING id
     `;
     console.log(`[ingest] Snapshot row id = ${snapshot.id}`);
 
-    // Bulk-upsert securities in chunks
     const CHUNK = 200;
     let written = 0;
     for (let i = 0; i < merged.length; i += CHUNK) {
@@ -432,7 +458,6 @@ async function main() {
       }
     }
 
-    // Upsert sample holdings
     console.log(`[ingest] Upserting ${SAMPLE_HOLDINGS.length} sample holdings`);
     const holdingValues = SAMPLE_HOLDINGS.map((h) => ({
       portfolio_label: SAMPLE_PORTFOLIO_LABEL,
@@ -463,65 +488,44 @@ async function main() {
   } finally {
     await sql.end();
   }
+}
 
-  // ─── Reconciliation against fixture ────────────────────
+function writeReportFile(report: ReturnType<typeof buildReport>) {
+  if (!existsSync(REPORT_DIR)) mkdirSync(REPORT_DIR, { recursive: true });
+  const reportPath = join(REPORT_DIR, `ingest-${report.snapshot_date}.json`);
+  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
+  console.log(`[ingest] Reconciliation report written to ${reportPath}`);
+}
 
-  if (!existsSync(FIXTURE_PATH)) {
-    console.log(
-      `\n⚠ tests/screen/expected-preset-counts.json does not exist yet. ` +
-      `Snapshotting current counts as the baseline.`
-    );
-    if (!existsSync(dirname(FIXTURE_PATH))) mkdirSync(dirname(FIXTURE_PATH), { recursive: true });
-    writeFileSync(
-      FIXTURE_PATH,
-      JSON.stringify(
-        {
-          _comment: "Expected per-stage counts for the v2 demo presets. Update only when the snapshot or filter rules intentionally change.",
-          snapshot_date: snapshotDate,
-          questionnaire_preset: report.questionnaire_preset,
-          methodology_preset: report.methodology_preset,
-        },
-        null,
-        2
-      )
-    );
-    console.log(`✓ Fixture written to ${FIXTURE_PATH}. Re-run to verify.`);
-    process.exit(0);
-  }
+// ─── Main ──────────────────────────────────────────────────
 
-  const fixture = readJson<{
-    questionnaire_preset: { stage: string; count: number }[];
-    methodology_preset: { stage: string; count: number }[];
-  }>(FIXTURE_PATH);
+async function main() {
+  const args = new Set(process.argv.slice(2));
+  const baseline = args.has("--baseline");
 
-  const drift: string[] = [];
-  for (const expected of fixture.questionnaire_preset) {
-    const actual = report.questionnaire_preset.find((s) => s.stage === expected.stage);
-    if (!actual || actual.count !== expected.count) {
-      drift.push(`questionnaire/${expected.stage}: expected ${expected.count}, got ${actual?.count ?? "MISSING"}`);
-    }
-  }
-  for (const expected of fixture.methodology_preset) {
-    const actual = report.methodology_preset.find((s) => s.stage === expected.stage);
-    if (!actual || actual.count !== expected.count) {
-      drift.push(`methodology/${expected.stage}: expected ${expected.count}, got ${actual?.count ?? "MISSING"}`);
-    }
-  }
+  // 1. Load + derive in memory
+  const merged = buildMergedRows();
 
-  if (drift.length > 0) {
-    console.error(`\n✗ Count drift detected vs ${FIXTURE_PATH}:`);
-    for (const d of drift) console.error(`    ${d}`);
-    console.error(
-      `\nIf the drift is intentional (snapshot updated or filter rules changed), ` +
-      `delete tests/screen/expected-preset-counts.json and re-run to re-baseline.`
-    );
-    process.exit(1);
-  }
+  // 2. Build report (applies both presets)
+  const ranked = readJson<{ snapshot_date: string; collected_at: string }>(
+    join(IMPORT_DIR, "asx_ranked_light.json")
+  );
+  const report = buildReport(merged, ranked.snapshot_date, ranked.collected_at);
+  printSummary(report);
 
-  console.log(`\n✓ All preset counts match fixture. Ingest complete.`);
+  // 3. Validate against fixture (or baseline) BEFORE touching the DB
+  validateOrBaseline(report, { baseline });
+
+  // 4. Persist to DB
+  await persist(merged, report.snapshot_date, report.collected_at);
+
+  // 5. Audit-trail report
+  writeReportFile(report);
+
+  console.log(`\n✓ Ingest complete.`);
 }
 
 main().catch((err) => {
-  console.error("✗ Ingest failed:", err);
+  console.error("\n✗ Ingest failed:", err);
   process.exit(2);
 });

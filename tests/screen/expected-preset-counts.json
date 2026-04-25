@@ -1,5 +1,5 @@
 {
-  "_comment": "Expected per-stage counts for the v2 demo presets. Update only when the snapshot or filter rules intentionally change.",
+  "_comment": "Expected per-stage counts for the v2 demo presets. Update only when the snapshot or filter rules intentionally change. Re-baseline with `bun scripts/ingest-asx-snapshot.ts --baseline`.",
   "snapshot_date": "2026-04-24",
   "questionnaire_preset": [
     {

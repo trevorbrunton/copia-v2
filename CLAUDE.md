@@ -235,14 +235,14 @@ Use `@/*` to import from the project root.
 ### Pep Screening Demo (OC Mid-Cap Fund)
 - Public page at `/demo/screen` — no auth required (the entire `/demo/*` tree is public)
 - Plan + decisions live in `docs/plans/pep-avatar-v2-plan.md`
-- Pipeline: VAD → multipart `POST /api/v1/screen/process` (ElevenLabs STT → rule-first matcher → Anthropic Haiku classifier fallback) → funnel mutation + Pep narration via Tavus Audio Echo
-- Avatar: continuous Tavus CVI WebRTC stream via Daily.co. Every narration goes through `tavusAvatar.echo()` which routes via `POST /api/v1/screen/tts` (ElevenLabs in our chosen voice → base64 PCM 24 kHz) → chunked `conversation.echo` Daily app-messages with `modality: "audio"`. Tavus's persona TTS is bypassed — voice is fully under our control. Falls back to text echo (Cartesia) if TTS unavailable. Schema and persona setup in `docs/TAVUS-PERSONA-SETUP.md`; `bun scripts/create-tavus-echo-persona.ts` spins up an echo-mode persona
+- Pipeline: VAD → multipart `POST /api/v1/screen/process` (ElevenLabs STT → rule-first matcher → Anthropic Haiku classifier fallback) → funnel mutation + Pep narration via Tavus text echo
+- Avatar: continuous Tavus CVI WebRTC stream via Daily.co. Every narration is sent as a `conversation.echo` Daily app-message with `modality: "text"`. The persona is configured `pipeline_mode: "echo"` with `tts_engine: "elevenlabs"` + our `external_voice_id` + our `api_key` in its TTS layer, so Tavus runs the text through ElevenLabs in our cloned voice server-side and the replica lip-syncs. Schema and persona setup in `docs/TAVUS-PERSONA-SETUP.md`; `bun scripts/create-tavus-echo-persona.ts` spins up an echo-mode persona shell
 - Snapshot-backed only — no live ASX feed (D3). `MarketDataProvider` interface lives in `src/screen/market-data-provider.ts` for future swap
 - Tables: `asx_snapshots`, `asx_securities`, `oc_holdings` (see `src/db/screen-schema.ts`); ingest via `bun scripts/ingest-asx-snapshot.ts`
 - `useVoiceListener()` provides continuous voice capture with amplitude-based VAD (silence timeout configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`, default 1000ms)
 - Tavus conversation cleanup: `DELETE /api/v1/demo/tavus/[conversationId]` ends conversations server-side; also fires on component unmount
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
-- Env vars: `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (Audio Echo voice), `ELEVENLABS_MODEL_ID` (optional, default `eleven_turbo_v2_5`), `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `NEXT_PUBLIC_TAVUS_PERSONA_ID` (must be `pipeline_mode: "echo"`)
+- Env vars: `ELEVENLABS_API_KEY` (STT path; a copy of this key is also stored server-side on the Tavus persona's TTS layer), `ELEVENLABS_VOICE_ID` (used by the setup script when patching the persona; not read at runtime), `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `NEXT_PUBLIC_TAVUS_PERSONA_ID` (must be `pipeline_mode: "echo"` with `tts_engine: "elevenlabs"`)
 
 ### v1 demo decommission (phase 7)
 - The v1 OC Mid-Cap demo (`/demo`, `app/api/v1/demo/process`, `app/api/v1/demo/qa`, `/config` admin) was removed in commit `<phase-7>` once v2 went pitch-ready

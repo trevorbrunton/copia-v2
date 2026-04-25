@@ -20,12 +20,7 @@ const REQUIREMENTS: EnvRequirement[] = [
   {
     name: "ELEVENLABS_API_KEY",
     reason:
-      "voice STT (POST /api/v1/screen/process) AND Audio Echo TTS (POST /api/v1/screen/tts) — both routes return 502 without it",
-  },
-  {
-    name: "ELEVENLABS_VOICE_ID",
-    reason:
-      "ElevenLabs voice id used by Audio Echo. Without it, TTS fails and useTavusAvatar.echo() falls back to text echo (Cartesia-rendered, voice rotation returns)",
+      "voice STT (POST /api/v1/screen/process) returns 502 without it. The Tavus persona also has a copy of this key in its TTS layer config server-side",
   },
   {
     name: "ANTHROPIC_API_KEY",

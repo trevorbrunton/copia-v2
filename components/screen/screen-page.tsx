@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Play, RotateCcw } from "lucide-react";
 import { PersonaSelector, PERSONA_OPTIONS } from "@/components/demo/persona-selector";
@@ -26,6 +26,16 @@ export function ScreenPage() {
   );
   const [preset, setPreset] = useState<Preset>("questionnaire");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
+  // Escape closes the StockFactPanel.
+  useEffect(() => {
+    if (selectedTicker === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedTicker(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedTicker]);
 
   const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
 

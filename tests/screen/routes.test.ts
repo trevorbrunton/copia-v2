@@ -53,6 +53,15 @@ describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/apply-filter", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects non-string entries in fromTickers with 400", async () => {
+    const res = await applyFilterPOST(
+      jsonRequest({ filterId: "q1_mcap_50m", fromTickers: ["CBA", 42, "BHP"] })
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
   it("Q1 from universe returns ~940 stocks", async () => {
     const res = await applyFilterPOST(jsonRequest({ filterId: "q1_mcap_50m" }));
     expect(res.status).toBe(200);

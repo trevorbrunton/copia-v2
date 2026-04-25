@@ -12,7 +12,7 @@
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
-| 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` |
+| 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `<phase-4-review>` (review fixes) |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |
 | 7. v1 code decommission | Not started | — |
@@ -600,3 +600,16 @@ Code review of phase 3 surfaced four moderate and three minor issues (plus two d
 | Minor | Snapshot-fetch error left no retry path | Start button label flips to "Retry" when `status === "error"` |
 | Documented | `dataQuality.enrichment_status` is snake_case in a sea of camelCase | Inherited from the DB jsonb shape; rename would cascade through ingest + storage. Acceptable for v2 |
 | Documented | No tests for `useScreener` or the snapshot route | Phase-3 exit criteria didn't require them; flagged for phase-4 plan |
+
+## 16. Review fixes applied during phase 4
+
+Code review of phase 4 surfaced one moderate and three minor issues (plus two documented-only items); all closed.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | `<StockFactPanel>` parsed `fact.source` (a display string) to recover the date for `<SourceBadge>`. Fragile if the source format ever changes | Added a structured `snapshotDate` field to `StockFact`; panel passes it directly. The `source` string remains for human display only |
+| Minor | Ticker `<button>` lacked `type="button"` — would default to `submit` if ever placed inside a form | `type="button"` added |
+| Minor | No keyboard shortcut to close `StockFactPanel` | Escape-key handler in `screen-page` clears `selectedTicker` |
+| Minor | `apply-filter` body validation untested for `fromTickers: [non-string]` | Test added; Zod confirmed to reject with 400 |
+| Documented | `getStockFact` makes two sequential DB queries | Could be one with a subquery; performance fine at v2 scale, defer |
+| Documented | No tests for `useScreener` or `StockFactPanel` | Routes are covered now; hook + component still uncovered. Raise for phase 5 |

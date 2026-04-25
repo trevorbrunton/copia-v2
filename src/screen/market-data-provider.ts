@@ -27,7 +27,12 @@ export type StockFact = {
   dayChangePct?: number;
   /** ISO-8601 timestamp the value relates to (snapshot's `collected_at`). */
   fetchedAt: string;
-  /** Human-readable label, e.g. "Snapshot 2026-04-24". */
+  /**
+   * The snapshot's date as a YYYY-MM-DD string. Provided as a structured
+   * field so consumers (e.g. `<SourceBadge>`) don't have to parse `source`.
+   */
+  snapshotDate: string;
+  /** Human-readable display label, e.g. "Snapshot 2026-04-24". */
   source: string;
   /** Hard-coded false for v2 — every value is snapshot-sourced. */
   isLive: boolean;
@@ -88,6 +93,7 @@ export class SnapshotMarketDataProvider implements MarketDataProvider {
       earningsStatus: row.earningsStatus ?? undefined,
       // dayChangePct: not stored in v2 — would come from a live provider
       fetchedAt,
+      snapshotDate: active.snapshotDate,
       source: `Snapshot ${active.snapshotDate}`,
       isLive: false,
     };

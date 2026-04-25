@@ -21,6 +21,8 @@ describe.skipIf(!SHOULD_RUN)("SnapshotMarketDataProvider (live DB)", () => {
     expect(fact!.sharePrice).toBeGreaterThan(0);
     expect(fact!.isLive).toBe(false);
     expect(fact!.source).toMatch(/^Snapshot \d{4}-\d{2}-\d{2}$/);
+    expect(fact!.snapshotDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(fact!.source).toBe(`Snapshot ${fact!.snapshotDate}`);
     expect(fact!.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(fact!.earningsStatus).toBe("Profitable (TTM)");
   });

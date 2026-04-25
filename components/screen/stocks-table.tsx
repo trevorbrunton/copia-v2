@@ -124,6 +124,7 @@ export function StocksTable({
               const isSelected = selectedTicker === r.ticker;
               const tickerCell = onTickerClick ? (
                 <button
+                  type="button"
                   onClick={() => onTickerClick(r.ticker)}
                   className="text-white hover:text-amber-300 underline-offset-2 hover:underline"
                 >

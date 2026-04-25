@@ -96,7 +96,7 @@ export function StockFactPanel({ ticker, onClose }: StockFactPanelProps) {
               </dl>
               <div className="mt-3 flex items-center gap-2">
                 <SourceBadge
-                  snapshot={{ date: fact.source.replace(/^Snapshot /, ""), collectedAt: fact.fetchedAt }}
+                  snapshot={{ date: fact.snapshotDate, collectedAt: fact.fetchedAt }}
                 />
                 <span className="text-[11px] text-white/40">
                   as of {new Date(fact.fetchedAt).toLocaleString()}

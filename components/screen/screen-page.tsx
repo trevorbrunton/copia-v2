@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw } from "lucide-react";
+import { Mic, MicOff, Play, RotateCcw } from "lucide-react";
 import { PersonaSelector, PERSONA_OPTIONS } from "@/components/demo/persona-selector";
 import { FunnelRail } from "./funnel-rail";
 import { StocksTable } from "./stocks-table";
@@ -11,6 +11,7 @@ import { SourceBadge } from "./source-badge";
 import { StalenessBanner } from "./staleness-banner";
 import { StockFactPanel } from "./stock-fact-panel";
 import { ConversationPane, type TranscriptEntry } from "./conversation-pane";
+import { AvatarVideo } from "./avatar-video";
 import {
   METHODOLOGY_FILTERS,
   QUESTIONNAIRE_FILTERS,
@@ -20,11 +21,29 @@ import {
 } from "@/src/screen/funnel";
 import type { Intent } from "@/src/screen/intent";
 import { useScreener } from "@/src/screen/use-screener";
+import {
+  describeAppliedFilter,
+  describeAppliedFilterFailure,
+  describeFallback,
+  describeFunnelComplete,
+  describeInitialScreenStart,
+  describeMonitoringEnabled,
+  describeOutputEmail,
+  describeOutputShow,
+  describePortfolioOverlap,
+  describeRestart,
+  describeStockFactRequest,
+  describeStockFactUnresolved,
+} from "@/src/screen/narration";
+import { useTavusAvatar } from "@/src/demo/use-tavus-avatar";
+import { useVoiceListener } from "@/src/demo/use-voice-listener";
 
 type Preset = "questionnaire" | "methodology";
 
 export function ScreenPage() {
   const screener = useScreener();
+  const tavusAvatar = useTavusAvatar();
+
   const [selectedPersona, setSelectedPersona] = useState<string>(
     PERSONA_OPTIONS[0]?.id ?? ""
   );
@@ -32,16 +51,7 @@ export function ScreenPage() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [isThinking, setIsThinking] = useState(false);
-
-  // Escape closes the StockFactPanel.
-  useEffect(() => {
-    if (selectedTicker === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedTicker(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectedTicker]);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
 
   const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
 
@@ -67,109 +77,118 @@ export function ScreenPage() {
     [screener.currentRows]
   );
 
-  const appendTranscript = useCallback((role: "user" | "assistant", text: string) => {
-    setTranscript((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role, text },
-    ]);
-  }, []);
+  const appendTranscript = useCallback(
+    (role: "user" | "assistant", text: string) => {
+      setTranscript((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role, text },
+      ]);
+    },
+    []
+  );
+
+  // Track tavus availability via ref so dispatcher closures see the latest.
+  const tavusReadyRef = useRef(false);
+  useEffect(() => {
+    tavusReadyRef.current =
+      tavusAvatar.status === "ready" || tavusAvatar.status === "speaking";
+  }, [tavusAvatar.status]);
 
   /**
-   * Run a filter and report the outcome on the transcript. If
-   * `screener.applyFilter` set an error, surface that instead of the
-   * default success line.
+   * Append an assistant line to the transcript AND have Pep speak it
+   * via Tavus echo when the avatar is ready. Best-effort — avatar
+   * failures are logged but don't break the text path.
    */
-  const applyAndNarrate = useCallback(
-    async (filterId: FilterId) => {
-      const errBefore = screener.error;
-      await screener.applyFilter(filterId);
-      const errAfter = screener.error;
-      // If a NEW error appeared, narrate failure rather than success.
-      if (errAfter && errAfter !== errBefore) {
-        appendTranscript("assistant", `Couldn't apply ${STAGE_LABELS[filterId]}: ${errAfter}.`);
-        return false;
+  const narrate = useCallback(
+    (text: string) => {
+      appendTranscript("assistant", text);
+      if (tavusReadyRef.current) {
+        tavusAvatar.echo(text).catch((err) => {
+          console.warn("[screen] tavus echo failed:", err);
+        });
       }
-      appendTranscript("assistant", `Applied ${STAGE_LABELS[filterId]}.`);
-      return true;
     },
-    [screener, appendTranscript]
+    [appendTranscript, tavusAvatar]
   );
 
   /**
-   * Run the entire methodology preset. Resets the funnel first so the
-   * rail starts cleanly from universe — otherwise stages from a
-   * mid-questionnaire run would mix with the methodology stages.
+   * Apply a filter and narrate the outcome (success counts via the
+   * narration templates; failure as a plain error line).
    */
+  const applyAndNarrate = useCallback(
+    async (filterId: FilterId): Promise<boolean> => {
+      const prevCount = screener.stages.at(-1)?.count ?? 0;
+      const stage = await screener.applyFilter(filterId);
+      if (!stage) {
+        narrate(describeAppliedFilterFailure(filterId, screener.error ?? "unknown error"));
+        return false;
+      }
+      narrate(describeAppliedFilter(filterId, stage.count, prevCount));
+      return true;
+    },
+    [screener, narrate]
+  );
+
+  /** Run the full methodology preset, resetting first for a clean rail. */
   const runInitialScreen = useCallback(async () => {
     if (screener.stages.length > 1) screener.reset();
     for (const f of METHODOLOGY_FILTERS) {
       const ok = await applyAndNarrate(f);
-      if (!ok) break; // bail on first failure
+      if (!ok) break;
     }
   }, [screener, applyAndNarrate]);
 
-  /** Convert an Intent into a UI action + a narration line. */
   const handleIntent = useCallback(
-    async (text: string, intent: Intent) => {
+    async (intent: Intent) => {
       switch (intent.kind) {
-        case "next_step": {
+        case "next_step":
           if (nextFilter) {
             await applyAndNarrate(nextFilter);
           } else {
-            appendTranscript("assistant", "The funnel is already complete. Try Reset to start over.");
+            narrate(describeFunnelComplete());
           }
           break;
-        }
-        case "apply_filter": {
+        case "apply_filter":
           await applyAndNarrate(intent.filterId);
           break;
-        }
-        case "apply_initial_screen": {
-          // Switch to methodology preset visually.
+        case "apply_initial_screen":
           if (preset !== "methodology") setPreset("methodology");
-          appendTranscript(
-            "assistant",
-            "Running the OC initial screen — applying market cap > $50m, profitable, cash-flow positive, exclusions, liquidity, and ASX-100 cut."
-          );
+          narrate(describeInitialScreenStart());
           await runInitialScreen();
           break;
-        }
         case "output_show": {
-          appendTranscript(
-            "assistant",
-            `Showing the ${screener.currentRows.length.toLocaleString()} stocks in the current stage in the table on the right.`
+          const current = screener.stages.at(-1);
+          narrate(
+            current
+              ? describeOutputShow(current)
+              : "There's nothing to show yet — start the screen first."
           );
           break;
         }
-        case "output_email": {
+        case "output_email":
           toast.success("Email queued — check your inbox.", {
-            description: "(Demo workflow — no email is actually sent.)",
+            description: "Demo workflow — no email is actually sent.",
           });
-          appendTranscript(
-            "assistant",
-            "I've queued an email of the current list to your inbox. (This is a demo workflow — no email is actually sent.)"
-          );
+          narrate(describeOutputEmail());
           break;
-        }
-        case "info_stock_field": {
+        case "info_stock_field":
           if (intent.ticker) {
             setSelectedTicker(intent.ticker);
-            appendTranscript(
-              "assistant",
-              `Pulling ${intent.field?.replace(/_/g, " ") ?? "details"} for ${intent.ticker} — see the panel below.`
+            narrate(
+              describeStockFactRequest(
+                intent.ticker,
+                intent.field,
+                screener.snapshot?.date
+              )
             );
           } else {
-            appendTranscript(
-              "assistant",
-              "I couldn't pin down which company you meant. Try a ticker like BHP or a more specific company name."
-            );
+            narrate(describeStockFactUnresolved());
           }
           break;
-        }
         case "info_portfolio_overlap": {
           const current = screener.stages.at(-1);
           if (!current) {
-            appendTranscript("assistant", "Run the screen first, then ask about portfolio overlap.");
+            narrate("Run the screen first, then ask about portfolio overlap.");
             break;
           }
           try {
@@ -185,49 +204,41 @@ export function ScreenPage() {
               nonMatching: Array<{ ticker: string }>;
               totalHoldings: number;
             };
-            const sampleNote = data.isSample ? " (based on the sample portfolio)" : "";
-            appendTranscript(
-              "assistant",
-              `${data.matching.length} of your ${data.totalHoldings} top holdings still meet the screen${sampleNote}. The ${data.nonMatching.length} that don't: ${data.nonMatching.map((h) => h.ticker).join(", ") || "—"}.`
+            narrate(
+              describePortfolioOverlap({
+                matching: data.matching.length,
+                totalHoldings: data.totalHoldings,
+                nonMatchingTickers: data.nonMatching.map((h) => h.ticker),
+                isSample: data.isSample,
+              })
             );
           } catch (e) {
-            appendTranscript(
-              "assistant",
+            narrate(
               `Couldn't compute the overlap: ${e instanceof Error ? e.message : "unknown error"}.`
             );
           }
           break;
         }
-        case "monitoring_enable_daily": {
+        case "monitoring_enable_daily":
           toast.success("Daily monitoring on.", {
-            description: "Demo workflow — I'll email you at 6am every day.",
+            description: "Demo workflow — no real schedule is started.",
           });
-          appendTranscript(
-            "assistant",
-            "Daily monitoring on. I'll email you at 6am every day, change-or-no-change. (Demo workflow — no real schedule is started.)"
-          );
+          narrate(describeMonitoringEnabled());
           break;
-        }
-        case "restart": {
+        case "restart":
           screener.reset();
-          appendTranscript("assistant", "Funnel reset. We're back to the universe stage.");
+          narrate(describeRestart());
           break;
-        }
         case "fallback":
-        default: {
-          appendTranscript(
-            "assistant",
-            "I can't answer that in this demo. Try asking about a filter, a stock's price or market cap, or running the OC initial screen."
-          );
+        default:
+          narrate(describeFallback());
           break;
-        }
       }
-      // `text` is unused here but reserved for future narration that may quote the user.
-      void text;
     },
-    [screener, nextFilter, preset, runInitialScreen, appendTranscript, applyAndNarrate]
+    [screener, nextFilter, preset, runInitialScreen, narrate, applyAndNarrate]
   );
 
+  /** Send transcribed/typed text through the intent pipeline. */
   const ask = useCallback(
     async (text: string) => {
       if (!isStarted) {
@@ -246,23 +257,111 @@ export function ScreenPage() {
           const body = await res.json().catch(() => null);
           throw new Error(body?.error?.message ?? `process failed: ${res.status}`);
         }
-        const data = (await res.json()) as { intent: Intent; text: string };
-        await handleIntent(text, data.intent);
+        const data = (await res.json()) as { intent: Intent };
+        await handleIntent(data.intent);
       } catch (e) {
-        appendTranscript(
-          "assistant",
-          `Error: ${e instanceof Error ? e.message : "couldn't classify the question"}.`
-        );
+        narrate(`Error: ${e instanceof Error ? e.message : "couldn't classify the question"}.`);
       } finally {
         setIsThinking(false);
       }
     },
-    [isStarted, appendTranscript, handleIntent]
+    [isStarted, appendTranscript, handleIntent, narrate]
   );
+
+  /** Voice handler — POST audio multipart to /process. */
+  const handleUtterance = useCallback(
+    async (pcm: ArrayBuffer, sampleRate: number) => {
+      setIsThinking(true);
+      try {
+        const form = new FormData();
+        form.append("audio", new Blob([pcm], { type: "application/octet-stream" }));
+        form.append("sampleRate", String(sampleRate));
+        const res = await fetch("/api/v1/screen/process", {
+          method: "POST",
+          body: form,
+          signal: AbortSignal.timeout(45_000),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `process (audio) failed: ${res.status}`);
+        }
+        const data = (await res.json()) as { text: string; intent: Intent };
+        if (!data.text) return; // no speech detected
+        appendTranscript("user", data.text);
+        await handleIntent(data.intent);
+      } catch (e) {
+        narrate(`Error: ${e instanceof Error ? e.message : "couldn't transcribe the audio"}.`);
+      } finally {
+        setIsThinking(false);
+      }
+    },
+    [appendTranscript, handleIntent, narrate]
+  );
+
+  const voiceListener = useVoiceListener({ onUtterance: handleUtterance });
+
+  // Pause/resume the voice listener while the avatar is speaking so we
+  // don't transcribe Pep's own voice as a follow-up question.
+  useEffect(() => {
+    if (!voiceEnabled) return;
+    if (tavusAvatar.status === "speaking") voiceListener.pause();
+    else voiceListener.resume();
+  }, [tavusAvatar.status, voiceEnabled, voiceListener]);
+
+  // Cleanup Tavus + voice on unmount.
+  useEffect(() => {
+    return () => {
+      voiceListener.stop();
+      tavusAvatar.stopAvatar().catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Escape closes the StockFactPanel.
+  useEffect(() => {
+    if (selectedTicker === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedTicker(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedTicker]);
+
+  /** Start the demo — load snapshot AND init Tavus in parallel. */
+  const startSession = useCallback(async () => {
+    await Promise.all([
+      screener.start(),
+      (async () => {
+        if (!selectedPersona) return;
+        const ok = await tavusAvatar.initAvatar(selectedPersona);
+        if (!ok) {
+          toast.message("Avatar offline — text mode only.", {
+            description: "The screening flow still works without Pep speaking.",
+          });
+        }
+      })(),
+    ]);
+  }, [screener, selectedPersona, tavusAvatar]);
+
+  /** Toggle voice listening. */
+  const toggleVoice = useCallback(async () => {
+    if (voiceEnabled) {
+      voiceListener.stop();
+      setVoiceEnabled(false);
+      return;
+    }
+    try {
+      await voiceListener.start();
+      setVoiceEnabled(true);
+    } catch (e) {
+      toast.error("Mic access denied.", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, [voiceEnabled, voiceListener]);
 
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] text-white">
-      {/* ─── Header ───────────────────────────────────────────── */}
       <header className="flex items-center justify-between border-b border-white/10 px-6 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white font-bold text-[var(--oc-navy)] text-sm">
@@ -285,19 +384,20 @@ export function ScreenPage() {
         </div>
       ) : null}
 
-      {/* ─── Body ────────────────────────────────────────────── */}
       <main className="flex flex-1 min-h-0 flex-col lg:flex-row">
         {/* Left rail */}
         <aside className="flex w-full flex-col gap-6 border-r border-white/10 p-4 lg:w-[22rem]">
-          <div className="flex aspect-video items-center justify-center rounded-2xl bg-[var(--oc-navy)] text-xs text-white/40">
-            Avatar (phase 6)
-          </div>
+          <AvatarVideo
+            mediaStream={tavusAvatar.mediaStream}
+            status={tavusAvatar.status}
+            error={tavusAvatar.error}
+          />
 
           {!isStarted ? (
             <div className="flex flex-col items-stretch gap-3">
               <PersonaSelector selectedId={selectedPersona} onChange={setSelectedPersona} />
               <Button
-                onClick={() => void screener.start()}
+                onClick={() => void startSession()}
                 disabled={isBusy}
                 className="bg-white text-[var(--oc-navy)] hover:bg-white/90 gap-2"
               >
@@ -336,21 +436,43 @@ export function ScreenPage() {
 
               <div className="flex gap-2">
                 <Button
-                  onClick={() => nextFilter && void screener.applyFilter(nextFilter)}
+                  onClick={() => nextFilter && void applyAndNarrate(nextFilter)}
                   disabled={!nextFilter || isBusy}
                   className="flex-1 bg-white text-[var(--oc-navy)] hover:bg-white/90"
                 >
                   {isBusy ? "Applying…" : nextFilter ? "Next filter →" : "Funnel complete"}
                 </Button>
                 <Button
-                  onClick={screener.reset}
+                  onClick={() => {
+                    screener.reset();
+                    narrate(describeRestart());
+                  }}
                   disabled={isBusy || screener.stages.length <= 1}
                   variant="ghost"
                   className="text-white/70 hover:bg-white/5 hover:text-white"
                 >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
+                <Button
+                  onClick={() => void toggleVoice()}
+                  variant="ghost"
+                  className={`text-white/70 hover:bg-white/5 ${
+                    voiceEnabled ? "text-emerald-300" : ""
+                  }`}
+                  title={voiceEnabled ? "Stop voice listening" : "Start voice listening"}
+                >
+                  {voiceEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                </Button>
               </div>
+              {voiceEnabled ? (
+                <div className="text-xs text-white/50">
+                  {voiceListener.isSpeaking
+                    ? "Listening — go ahead."
+                    : tavusAvatar.status === "speaking"
+                      ? "Pep is speaking…"
+                      : "Mic on. Ask Pep anything."}
+                </div>
+              ) : null}
             </>
           )}
         </aside>
@@ -394,7 +516,6 @@ export function ScreenPage() {
                   onClose={() => setSelectedTicker(null)}
                 />
               ) : null}
-              {/* Mobile: conversation under the table */}
               <ConversationPane
                 transcript={transcript}
                 isThinking={isThinking}

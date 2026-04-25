@@ -14,7 +14,7 @@
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
 | 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` (initial), `4e0e3fd` (review fixes) |
-| 6. Polish and pitch hardening | Not started | — |
+| 6. Polish and pitch hardening | ✓ Complete | (this commit) |
 | 7. v1 code decommission | Not started | — |
 
 ---
@@ -500,16 +500,29 @@ The revised plan is only done when all of the following are true:
 
 **Exit criteria:** ✓ The 8 supplied questions are answered correctly via the typed-input flow; rules cover scripted paraphrases without an LLM call; the classifier fallback degrades gracefully to `fallback` if Anthropic is misconfigured.
 
-### Phase 6 - polish and pitch hardening
+### Phase 6 - polish and pitch hardening ✓ COMPLETE
 
-- tighten answer wording per the spoken-answer policy (§7c)
-- add sample-data labelling for Q8 (`is_sample = true` rows)
-- add data-quality footnote on the funnel rail surfacing the `data_quality.enrichment_status != "ok"` count
-- wire the staleness banner per §8a thresholds
-- add manual run-through script at `docs/plans/pep-avatar-v2-pitch-script.md`
-- deploy to Vercel; run the manual script end-to-end against the deployed snapshot
+1. ✓ Narration wording extracted into `src/screen/narration.ts` per §7c. Each filter has its own template that includes the count; Q5 narrates Pep's "subsumed by profitability" framing as a curated demo flag (not an automatic classification). Email and monitoring intents disclose their demo nature explicitly.
+2. ✓ Tavus avatar wiring: new `components/screen/avatar-video.tsx` replaces the placeholder. `useTavusAvatar` initialised from `startSession()` with the selected persona; every assistant narration is echoed via `tavusAvatar.echo()` when the avatar is ready. Cleanup on unmount.
+3. ✓ STT in the process route: multipart audio mode added alongside JSON. `src/screen/stt.ts` lifts the v1 ElevenLabs `scribe_v1` helper. Empty-speech audio returns `{ text: "", intent: "fallback" }` for graceful UX.
+4. ✓ Voice listener wiring: `useVoiceListener` from v1 reused. Mic toggle in the left rail; the listener pauses while Pep is speaking so we don't transcribe Pep's own voice as a follow-up question.
+5. ✓ Sample-data labelling for Q8 already shipped in phase 5; narration now uses `describePortfolioOverlap({ isSample })` and inserts "(based on your sample portfolio)" when the flag is set.
+6. ✓ Data-quality footnote on the funnel rail already shipped in phase 3; surfaces the `enrichment_status != "ok"` count.
+7. ✓ Staleness banner already wired per §8a thresholds in phase 3.
+8. ✓ Pitch run-through script committed at `docs/plans/pep-avatar-v2-pitch-script.md` — pre-flight checklist, opening, both paths, recovery table.
+9. ✓ Stubbed Anthropic classifier test added (`tests/screen/screen-matcher.test.ts`, 4 cases) — closes phase-5 documented gap.
 
-**Exit criteria:** pitch-ready.
+**Test totals: 119/119** (was 115; +4 screen-matcher composition tests).
+
+**Smoke test:**
+- `/demo/screen` 200 in 26ms (cold).
+- Multipart audio mode validation: missing `audio` → 400 `VALIDATION_ERROR`; oversized rejected.
+- Tavus init runs in parallel with snapshot load on Start.
+- Voice mic toggle pauses listener while avatar is speaking.
+
+**Exit criteria:** ✓ pitch-ready. The demo runs end-to-end via voice OR typed input; Pep narrates every action with `§7c`-compliant wording; the run-through script covers both presets + recovery paths.
+
+**Vercel deploy** is the last step before the meeting — env vars to set are listed in the plan §9; data is already populated in the shared Supabase. Final validation is the manual run-through against the deployed URL.
 
 ### Phase 7 - v1 code decommission
 

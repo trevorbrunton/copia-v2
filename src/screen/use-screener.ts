@@ -24,8 +24,12 @@ export type ScreenSession = {
 interface UseScreenerReturn extends ScreenSession {
   /** Load the active snapshot and seed the universe stage. Idempotent. */
   start: () => Promise<void>;
-  /** Apply one filter to the current stage and append the result. */
-  applyFilter: (filterId: FilterId) => Promise<void>;
+  /**
+   * Apply one filter to the current stage and append the result.
+   * Returns the new stage on success, null on failure (the error is
+   * also surfaced via the `error` field for UI consumption).
+   */
+  applyFilter: (filterId: FilterId) => Promise<Stage | null>;
   /** Reset back to the universe stage (snapshot stays). */
   reset: () => void;
   /** Convenience: SecurityDisplay rows for the current stage's tickers. */
@@ -90,10 +94,10 @@ export function useScreener(): UseScreenerReturn {
   }, [status]);
 
   const applyFilter = useCallback(
-    async (filterId: FilterId) => {
-      if (applyInFlightRef.current || status !== "ready") return;
+    async (filterId: FilterId): Promise<Stage | null> => {
+      if (applyInFlightRef.current || status !== "ready") return null;
       const current = stages.at(-1);
-      if (!current) return;
+      if (!current) return null;
       applyInFlightRef.current = true;
       setStatus("applying");
       setError(null);
@@ -115,9 +119,11 @@ export function useScreener(): UseScreenerReturn {
         }
         setStages((prev) => [...prev, data.stage]);
         setStatus("ready");
+        return data.stage;
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to apply filter");
         setStatus("ready"); // recover to ready so the user can retry
+        return null;
       } finally {
         applyInFlightRef.current = false;
       }

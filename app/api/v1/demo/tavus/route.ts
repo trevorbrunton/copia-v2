@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
     if (!personaId) {
       throw new ExternalServiceError(
-        "persona_id is required (set NEXT_PUBLIC_TAVUS_PERSONA_GENERIC or NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM in client env)",
+        "persona_id is required (set NEXT_PUBLIC_TAVUS_PERSONA_ID in client env)",
         "tavus"
       );
     }

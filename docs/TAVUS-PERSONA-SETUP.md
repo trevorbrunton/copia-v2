@@ -32,15 +32,14 @@ If you ever need to keep utterance text out of Tavus's data path (e.g. for ISO-2
 
 ```bash
 bun scripts/create-tavus-echo-persona.ts \
-  --name "Pep Generic" \
+  --name "Pep" \
   --replica-id rXXXXXXXXX
 ```
 
-Run it once per persona slot you want. The replica id comes from your Tavus dashboard (Replicas tab). The script prints the new `persona_id`; copy it into the matching env var:
+The replica id comes from your Tavus dashboard (Replicas tab). The script prints the new `persona_id`; copy it into the env var:
 
 ```env
-NEXT_PUBLIC_TAVUS_PERSONA_GENERIC=<persona_id from script>
-NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM=<another persona_id from a second run>
+NEXT_PUBLIC_TAVUS_PERSONA_ID=<persona_id from script>
 ```
 
 ### Option B — direct API
@@ -50,7 +49,7 @@ curl -X POST https://tavusapi.com/v2/personas \
   -H "x-api-key: $TAVUS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "persona_name": "Pep Generic",
+    "persona_name": "Pep",
     "pipeline_mode": "echo",
     "default_replica_id": "rXXXXXXXXX"
   }'
@@ -117,10 +116,9 @@ Both schemas are documented under *Tavus → Interactions Protocol*.
 ## Related env vars
 
 ```env
-TAVUS_API_KEY=                       # server-side, used for conversation create + DELETE
-TAVUS_REPLICA_ID=                    # default replica if persona doesn't set one
-NEXT_PUBLIC_TAVUS_PERSONA_GENERIC=   # echo-mode persona id (Generic radio)
-NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM=    # echo-mode persona id (Custom radio)
+TAVUS_API_KEY=                  # server-side, used for conversation create + DELETE
+TAVUS_REPLICA_ID=               # default replica if persona doesn't set one
+NEXT_PUBLIC_TAVUS_PERSONA_ID=   # echo-mode persona id used by /demo/screen
 ```
 
-`NEXT_PUBLIC_TAVUS_PERSONA_*` need to be public so the client can pass the selected one through to `POST /api/v1/demo/tavus`. The API key stays server-side.
+`NEXT_PUBLIC_TAVUS_PERSONA_ID` is public so the client can pass it through to `POST /api/v1/demo/tavus`. The API key stays server-side.

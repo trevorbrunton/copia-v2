@@ -6,15 +6,11 @@
  *
  * Usage:
  *   bun scripts/create-tavus-echo-persona.ts \
- *     --name "Pep Generic" \
+ *     --name "Pep" \
  *     --replica-id r1234567890
  *
- *   bun scripts/create-tavus-echo-persona.ts --name "Pep Custom" --replica-id rABCDE
- *
- * Run once per persona slot you want (Generic, Custom, …). The script
- * prints the resulting persona_id; copy it into the matching env var:
- *   NEXT_PUBLIC_TAVUS_PERSONA_GENERIC=<id>
- *   NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM=<id>
+ * The script prints the resulting persona_id; copy it into:
+ *   NEXT_PUBLIC_TAVUS_PERSONA_ID=<id>
  *
  * Reads TAVUS_API_KEY from the environment. Loads .env.local if present.
  */
@@ -125,9 +121,7 @@ async function main(): Promise<void> {
   console.log(`  pipeline_mode: ${parsed.pipeline_mode ?? "?"}`);
   console.log("");
   console.log(`Add to your env (.env.local / Vercel):`);
-  console.log(`  NEXT_PUBLIC_TAVUS_PERSONA_GENERIC=${id}`);
-  console.log(`    or`);
-  console.log(`  NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM=${id}`);
+  console.log(`  NEXT_PUBLIC_TAVUS_PERSONA_ID=${id}`);
 }
 
 main().catch((err) => {

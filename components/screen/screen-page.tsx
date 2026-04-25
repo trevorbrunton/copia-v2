@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Mic, MicOff, Play, RotateCcw } from "lucide-react";
-import { PersonaSelector, PERSONA_OPTIONS } from "@/components/demo/persona-selector";
 import { FunnelRail } from "./funnel-rail";
 import { StocksTable } from "./stocks-table";
 import { SourceBadge } from "./source-badge";
@@ -40,14 +39,15 @@ import { useVoiceListener } from "@/src/demo/use-voice-listener";
 
 type Preset = "questionnaire" | "methodology";
 
+// Single configured Pep persona — must be `pipeline_mode: "echo"` per
+// docs/TAVUS-PERSONA-SETUP.md. Read once at module load; surfaced as a
+// constant so the rest of the page just consumes it.
+const PEP_PERSONA_ID = process.env.NEXT_PUBLIC_TAVUS_PERSONA_ID ?? "";
+
 export function ScreenPage() {
   const screener = useScreener();
   const tavusAvatar = useTavusAvatar();
 
-  const [selectedPersona, setSelectedPersona] = useState<string>(
-    // Default to the Custom persona; fall back to whatever is first if Custom isn't configured.
-    PERSONA_OPTIONS.find((p) => p.label === "Custom")?.id ?? PERSONA_OPTIONS[0]?.id ?? ""
-  );
   const [preset, setPreset] = useState<Preset>("questionnaire");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -343,8 +343,8 @@ export function ScreenPage() {
     await Promise.all([
       screener.start(),
       (async () => {
-        if (!selectedPersona) return;
-        const ok = await tavusAvatar.initAvatar(selectedPersona);
+        if (!PEP_PERSONA_ID) return;
+        const ok = await tavusAvatar.initAvatar(PEP_PERSONA_ID);
         if (!ok) {
           toast.message("Avatar offline — text mode only.", {
             description: "The screening flow still works without Pep speaking.",
@@ -352,7 +352,7 @@ export function ScreenPage() {
         }
       })(),
     ]);
-  }, [screener, selectedPersona, tavusAvatar]);
+  }, [screener, tavusAvatar]);
 
   /** Toggle voice listening. */
   const toggleVoice = useCallback(async () => {
@@ -406,7 +406,6 @@ export function ScreenPage() {
 
           {!isStarted ? (
             <div className="flex flex-col items-stretch gap-3">
-              <PersonaSelector selectedId={selectedPersona} onChange={setSelectedPersona} />
               <Button
                 onClick={() => void startSession()}
                 disabled={isBusy}

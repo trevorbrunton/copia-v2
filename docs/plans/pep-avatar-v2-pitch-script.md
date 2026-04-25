@@ -94,7 +94,8 @@ After either funnel completes, you can interrogate any name in the shortlist. Cl
 
 | Symptom | Action |
 |---|---|
-| Pep's video doesn't appear | Check `NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM` in Vercel env. Demo still runs in text mode — the transcript shows everything. |
+| Pep's video doesn't appear | Check `NEXT_PUBLIC_TAVUS_PERSONA_ID` in Vercel env. Demo still runs in text mode — the transcript shows everything. |
+| Pep speaks in two voices simultaneously | Persona is not in echo mode. Verify with `GET /v2/personas/$NEXT_PUBLIC_TAVUS_PERSONA_ID` → `pipeline_mode === "echo"`. See `docs/TAVUS-PERSONA-SETUP.md`. |
 | Voice mic doesn't work | Click the mic icon in the rail to disable; switch to typed input. |
 | A specific filter answer is wrong vs. expected | Open `tests/screen/expected-preset-counts.json` — the fixture should match. Drift means re-ingest. |
 | Tavus session disconnects mid-demo | Click **Reset** then **Start Screening** again. Snapshot stays loaded. |

@@ -155,7 +155,7 @@ The sample portfolio for Q8 is seeded with the **10 real holdings supplied** (Ma
 
 | # | Assumption |
 |---|---|
-| 10.1 | The demo opens at the persona-selector screen. The user picks Generic or Custom (Pep), then clicks **Start Conversation**. |
+| 10.1 | The demo opens with a single **Start Screening** button. Pep is the only persona; persona selection is handled by env var (`NEXT_PUBLIC_TAVUS_PERSONA_ID`), not by user choice. |
 | 10.2 | Pep delivers a brief greeting that frames the demo. |
 | 10.3 | The user speaks (or types) Pep's eight supplied questions in sequence; the funnel rail and stocks table animate; the avatar narrates each step. |
 | 10.4 | The user can also say *"run the OC initial screen"* to take the Methodology path. |

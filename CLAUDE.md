@@ -83,8 +83,6 @@ components/
 ├── theme-toggle.tsx    # Dark/light toggle
 ├── providers.tsx       # QueryProvider + ThemeProvider
 ├── ui/                 # shadcn/ui components (incl. badge, breadcrumb)
-├── demo/               # Shared demo widgets
-│   └── persona-selector.tsx # Tavus persona selector (Generic / Custom)
 ├── screen/             # Pep screening demo components
 │   ├── screen-page.tsx       # Top-level layout (avatar + funnel rail + table + chat)
 │   ├── avatar-video.tsx      # Tavus video pane
@@ -244,7 +242,7 @@ Use `@/*` to import from the project root.
 - `useVoiceListener()` provides continuous voice capture with amplitude-based VAD (silence timeout configurable via `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS`, default 1000ms)
 - Tavus conversation cleanup: `DELETE /api/v1/demo/tavus/[conversationId]` ends conversations server-side; also fires on component unmount
 - OC Funds brand colors as CSS custom properties (`--oc-navy`, `--oc-dark`, etc.) in `globals.css`
-- Env vars: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `NEXT_PUBLIC_TAVUS_PERSONA_GENERIC`, `NEXT_PUBLIC_TAVUS_PERSONA_CUSTOM`
+- Env vars: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL_ID` (optional), `TAVUS_API_KEY`, `TAVUS_REPLICA_ID`, `NEXT_PUBLIC_TAVUS_PERSONA_ID` (must be `pipeline_mode: "echo"`)
 
 ### v1 demo decommission (phase 7)
 - The v1 OC Mid-Cap demo (`/demo`, `app/api/v1/demo/process`, `app/api/v1/demo/qa`, `/config` admin) was removed in commit `<phase-7>` once v2 went pitch-ready

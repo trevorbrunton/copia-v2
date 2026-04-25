@@ -24,6 +24,9 @@ import {
   describeAppliedFilter,
   describeAppliedFilterFailure,
   describeFallback,
+  describeFundFact,
+  describeFundFactMissingCategory,
+  describeFundFactMissingFund,
   describeFunnelComplete,
   describeInitialScreenStart,
   describeMonitoringEnabled,
@@ -35,10 +38,22 @@ import {
   describeStockFactRequest,
   describeStockFactUnresolved,
 } from "@/src/screen/narration";
+import {
+  CATEGORY_IDS,
+  getCategoryLabel,
+  getFundAnswer,
+  getFundDisplayName,
+  listFunds,
+  type CategoryId,
+  type FundId,
+} from "@/src/screen/fund-qa";
 import { useTavusAvatar } from "@/src/demo/use-tavus-avatar";
 import { useVoiceListener } from "@/src/demo/use-voice-listener";
 
 type Preset = "questionnaire" | "methodology";
+type Mode = "screening" | "fund_qa";
+
+const FUNDS = listFunds();
 
 // Single configured Pep persona — must be `pipeline_mode: "echo"` per
 // docs/TAVUS-PERSONA-SETUP.md. Read once at module load; surfaced as a
@@ -50,6 +65,8 @@ export function ScreenPage() {
   const tavusAvatar = useTavusAvatar();
 
   const [preset, setPreset] = useState<Preset>("questionnaire");
+  const [mode, setMode] = useState<Mode>("screening");
+  const [activeFund, setActiveFund] = useState<FundId>("mid_cap");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [isThinking, setIsThinking] = useState(false);
@@ -258,6 +275,26 @@ export function ScreenPage() {
           });
           narrate(describeMonitoringEnabled());
           break;
+        case "info_fund_field": {
+          // In fund_qa mode, fall back to the active fund when the
+          // utterance didn't name one (e.g. "what are the fees" with a
+          // fund pre-selected). In screening mode the user must name
+          // the fund — otherwise we can't disambiguate from screening
+          // questions.
+          const fundId =
+            intent.fundId ?? (mode === "fund_qa" ? activeFund : undefined);
+          if (!fundId) {
+            narrate(describeFundFactMissingFund());
+            break;
+          }
+          if (!intent.category) {
+            narrate(describeFundFactMissingCategory(getFundDisplayName(fundId)));
+            break;
+          }
+          const answer = getFundAnswer(fundId, intent.category);
+          narrate(describeFundFact(getFundDisplayName(fundId), answer));
+          break;
+        }
         case "restart":
           screener.reset();
           narrate(describeRestart());
@@ -268,7 +305,32 @@ export function ScreenPage() {
           break;
       }
     },
-    [screener, nextFilter, preset, runInitialScreen, narrate, applyAndNarrate]
+    [
+      screener,
+      nextFilter,
+      preset,
+      runInitialScreen,
+      narrate,
+      applyAndNarrate,
+      mode,
+      activeFund,
+    ]
+  );
+
+  /**
+   * Click-driven path for the fund-info panel — bypasses the /process
+   * route since we already know the fundId + category from the click.
+   * Logs a synthetic user line into the transcript so the chat panel
+   * shows the question that produced the answer.
+   */
+  const askAboutCategory = useCallback(
+    async (fundId: FundId, category: CategoryId) => {
+      const fundName = getFundDisplayName(fundId);
+      const label = getCategoryLabel(category).toLowerCase();
+      appendTranscript("user", `Tell me about the ${fundName}'s ${label}.`);
+      await handleIntent({ kind: "info_fund_field", fundId, category });
+    },
+    [appendTranscript, handleIntent]
   );
 
   /** Send transcribed/typed text through the intent pipeline. */
@@ -444,47 +506,101 @@ export function ScreenPage() {
           ) : (
             <>
               <div className="flex items-center justify-between text-xs text-white/60">
-                <span className="font-medium">Preset</span>
+                <span className="font-medium">Mode</span>
                 <div className="flex gap-1 rounded-md bg-white/5 p-0.5">
-                  {(["questionnaire", "methodology"] as Preset[]).map((p) => (
+                  {(["screening", "fund_qa"] as Mode[]).map((m) => (
                     <button
-                      key={p}
+                      key={m}
                       type="button"
-                      onClick={() => setPreset(p)}
-                      disabled={screener.stages.length > 1}
+                      onClick={() => setMode(m)}
                       className={`rounded px-2 py-1 text-xs ${
-                        preset === p
+                        mode === m
                           ? "bg-white text-[var(--oc-navy)]"
                           : "text-white/70 hover:text-white"
-                      } disabled:opacity-50 disabled:hover:text-white/70`}
+                      }`}
                     >
-                      {p === "questionnaire" ? "Pep's 8 Qs" : "OC methodology"}
+                      {m === "screening" ? "Screening" : "Fund Q&A"}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <FunnelRail stages={screener.stages} pending={pending} />
+              {mode === "screening" ? (
+                <>
+                  <div className="flex items-center justify-between text-xs text-white/60">
+                    <span className="font-medium">Preset</span>
+                    <div className="flex gap-1 rounded-md bg-white/5 p-0.5">
+                      {(["questionnaire", "methodology"] as Preset[]).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setPreset(p)}
+                          disabled={screener.stages.length > 1}
+                          className={`rounded px-2 py-1 text-xs ${
+                            preset === p
+                              ? "bg-white text-[var(--oc-navy)]"
+                              : "text-white/70 hover:text-white"
+                          } disabled:opacity-50 disabled:hover:text-white/70`}
+                        >
+                          {p === "questionnaire" ? "Pep's 8 Qs" : "OC methodology"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <FunnelRail stages={screener.stages} pending={pending} />
+                </>
+              ) : (
+                <div className="flex flex-col gap-2 text-xs text-white/60">
+                  <span className="font-medium">Fund</span>
+                  <div className="flex flex-col gap-1 rounded-md bg-white/5 p-0.5">
+                    {FUNDS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setActiveFund(f.id)}
+                        className={`rounded px-2 py-1.5 text-left text-xs ${
+                          activeFund === f.id
+                            ? "bg-white text-[var(--oc-navy)]"
+                            : "text-white/70 hover:text-white"
+                        }`}
+                      >
+                        {f.shortName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {mode === "screening" ? null : <div className="flex-1" />}
 
               <div className="flex gap-2">
-                <Button
-                  onClick={() => nextFilter && void applyAndNarrate(nextFilter)}
-                  disabled={!nextFilter || isBusy}
-                  className="flex-1 bg-white text-[var(--oc-navy)] hover:bg-white/90"
-                >
-                  {isBusy ? "Applying…" : nextFilter ? "Next filter →" : "Funnel complete"}
-                </Button>
-                <Button
-                  onClick={() => {
-                    screener.reset();
-                    narrate(describeRestart());
-                  }}
-                  disabled={isBusy || screener.stages.length <= 1}
-                  variant="ghost"
-                  className="text-white/70 hover:bg-white/5 hover:text-white"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
+                {mode === "screening" ? (
+                  <>
+                    <Button
+                      onClick={() => nextFilter && void applyAndNarrate(nextFilter)}
+                      disabled={!nextFilter || isBusy}
+                      className="flex-1 bg-white text-[var(--oc-navy)] hover:bg-white/90"
+                    >
+                      {isBusy ? "Applying…" : nextFilter ? "Next filter →" : "Funnel complete"}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        screener.reset();
+                        narrate(describeRestart());
+                      }}
+                      disabled={isBusy || screener.stages.length <= 1}
+                      variant="ghost"
+                      className="text-white/70 hover:bg-white/5 hover:text-white"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex-1 text-xs text-white/50">
+                    Pick a fund, then ask Pep — or click a category in the panel.
+                  </div>
+                )}
                 <Button
                   onClick={() => void toggleVoice()}
                   variant="ghost"
@@ -509,9 +625,13 @@ export function ScreenPage() {
           )}
         </aside>
 
-        {/* Right pane: stocks table + conversation */}
+        {/* Right pane: stocks table + conversation OR fund-info panel */}
         <section className="flex flex-1 min-h-0 flex-col">
-          {isStarted ? (
+          {!isStarted ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-white/40">
+              Press <span className="mx-1 font-medium text-white/70">Start Screening</span> to load the snapshot.
+            </div>
+          ) : mode === "screening" ? (
             <>
               <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
                 <span>
@@ -556,9 +676,46 @@ export function ScreenPage() {
               />
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-white/40">
-              Press <span className="mx-1 font-medium text-white/70">Start Screening</span> to load the snapshot.
-            </div>
+            <>
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
+                <span>
+                  Active fund:{" "}
+                  <span className="text-white">{getFundDisplayName(activeFund)}</span>
+                </span>
+                <span className="text-white/40">
+                  Click a category to ask Pep, or use voice.
+                </span>
+              </div>
+              <div className="flex flex-1 min-h-0">
+                <div className="flex-1 min-h-0 overflow-auto p-4">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {CATEGORY_IDS.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => void askAboutCategory(activeFund, cat)}
+                        disabled={isThinking}
+                        className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50"
+                      >
+                        {getCategoryLabel(cat)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ConversationPane
+                  transcript={transcript}
+                  isThinking={isThinking}
+                  onAsk={ask}
+                  className="hidden lg:flex flex-col w-[26rem] border-l border-white/10"
+                />
+              </div>
+              <ConversationPane
+                transcript={transcript}
+                isThinking={isThinking}
+                onAsk={ask}
+                className="lg:hidden flex flex-col h-[40svh] border-t border-white/10"
+              />
+            </>
           )}
         </section>
       </main>

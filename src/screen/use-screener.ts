@@ -44,8 +44,10 @@ export function useScreener(): UseScreenerReturn {
     () => new Map()
   );
 
-  // Guard against double-fires (StrictMode dev double-mount, accidental re-clicks).
+  // Guard against double-fires (StrictMode dev double-mount, accidental
+  // re-clicks, programmatic callers like phase-5 voice intents).
   const startInFlightRef = useRef(false);
+  const applyInFlightRef = useRef(false);
 
   const start = useCallback(async () => {
     if (startInFlightRef.current || status === "loading" || status === "ready" || status === "applying") {
@@ -89,9 +91,10 @@ export function useScreener(): UseScreenerReturn {
 
   const applyFilter = useCallback(
     async (filterId: FilterId) => {
-      if (status !== "ready") return;
+      if (applyInFlightRef.current || status !== "ready") return;
       const current = stages.at(-1);
       if (!current) return;
+      applyInFlightRef.current = true;
       setStatus("applying");
       setError(null);
       try {
@@ -105,11 +108,18 @@ export function useScreener(): UseScreenerReturn {
           throw new Error(body?.error?.message ?? `apply-filter failed: ${res.status}`);
         }
         const data: ApplyFilterResponse = await res.json();
+        if (data.stage?.id !== filterId) {
+          throw new Error(
+            `apply-filter returned stage "${data.stage?.id}" for request "${filterId}"`
+          );
+        }
         setStages((prev) => [...prev, data.stage]);
         setStatus("ready");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to apply filter");
         setStatus("ready"); // recover to ready so the user can retry
+      } finally {
+        applyInFlightRef.current = false;
       }
     },
     [status, stages]

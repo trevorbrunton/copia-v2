@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { SecurityDisplay } from "@/src/screen/types";
 
 /**
@@ -64,15 +64,20 @@ export function StocksTable({ rows, defaultLimit = 50, className }: StocksTableP
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const sorted = [...rows].sort((a, b) => {
-    const av = sortKey === "ticker" ? a.ticker : (a[sortKey] ?? Number.NEGATIVE_INFINITY);
-    const bv = sortKey === "ticker" ? b.ticker : (b[sortKey] ?? Number.NEGATIVE_INFINITY);
-    if (av < bv) return sortDir === "asc" ? -1 : 1;
-    if (av > bv) return sortDir === "asc" ? 1 : -1;
-    return 0;
-  });
+  const sorted = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const av = sortKey === "ticker" ? a.ticker : (a[sortKey] ?? Number.NEGATIVE_INFINITY);
+      const bv = sortKey === "ticker" ? b.ticker : (b[sortKey] ?? Number.NEGATIVE_INFINITY);
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [rows, sortKey, sortDir]);
 
-  const visible = showAll ? sorted : sorted.slice(0, defaultLimit);
+  const visible = useMemo(
+    () => (showAll ? sorted : sorted.slice(0, defaultLimit)),
+    [sorted, showAll, defaultLimit]
+  );
 
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));

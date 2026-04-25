@@ -18,9 +18,12 @@ interface StalenessBannerProps {
 const MS_PER_DAY = 86_400_000;
 
 export function StalenessBanner({ snapshot, now = new Date() }: StalenessBannerProps) {
-  const ageMs = now.getTime() - new Date(snapshot.collectedAt).getTime();
-  const ageDays = Math.max(0, Math.floor(ageMs / MS_PER_DAY));
+  const collectedMs = new Date(snapshot.collectedAt).getTime();
+  // If collectedAt is invalid (NaN) we can't reason about age — render
+  // nothing rather than emit "Snapshot is NaN days old".
+  if (!Number.isFinite(collectedMs)) return null;
 
+  const ageDays = Math.max(0, Math.floor((now.getTime() - collectedMs) / MS_PER_DAY));
   if (ageDays <= 7) return null;
 
   const isRed = ageDays > 30;

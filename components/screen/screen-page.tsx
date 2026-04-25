@@ -9,31 +9,12 @@ import { StocksTable } from "./stocks-table";
 import { SourceBadge } from "./source-badge";
 import { StalenessBanner } from "./staleness-banner";
 import {
-  STAGE_IDS,
+  METHODOLOGY_FILTERS,
+  QUESTIONNAIRE_FILTERS,
   STAGE_LABELS,
-  type FilterId,
   type StageId,
 } from "@/src/screen/funnel";
 import { useScreener } from "@/src/screen/use-screener";
-
-/** Filter sequences exposed in the UI per preset (mirror plan §4b). */
-const QUESTIONNAIRE_SEQUENCE: FilterId[] = [
-  STAGE_IDS.Q1_MCAP_50M,
-  STAGE_IDS.Q2_TOP_100,
-  STAGE_IDS.Q3_TURNOVER_20,
-  STAGE_IDS.Q4_PROFITABLE,
-  STAGE_IDS.Q5_UNPROVEN_TECH,
-  STAGE_IDS.Q6_SINGLE_COMMODITY,
-];
-const METHODOLOGY_SEQUENCE: FilterId[] = [
-  STAGE_IDS.M1_MCAP_50M,
-  STAGE_IDS.M2_PROFITABLE,
-  STAGE_IDS.M3_CASHFLOW_POSITIVE,
-  STAGE_IDS.M4_EXCLUDE_UNPROVEN_TECH,
-  STAGE_IDS.M5_EXCLUDE_SINGLE_COMMODITY,
-  STAGE_IDS.M6_SUFFICIENT_LIQUIDITY,
-  STAGE_IDS.M7_EXCLUDE_ASX_100,
-];
 
 type Preset = "questionnaire" | "methodology";
 
@@ -44,7 +25,7 @@ export function ScreenPage() {
   );
   const [preset, setPreset] = useState<Preset>("questionnaire");
 
-  const sequence = preset === "questionnaire" ? QUESTIONNAIRE_SEQUENCE : METHODOLOGY_SEQUENCE;
+  const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
 
   // Position within the active preset: which filter would `Next` apply?
   const completedStageIds: StageId[] = screener.stages.map((s) => s.id);
@@ -61,9 +42,13 @@ export function ScreenPage() {
 
   const isStarted = screener.snapshot !== null;
   const isBusy = screener.status === "loading" || screener.status === "applying";
-  const enrichmentFailed = screener.currentRows.filter(
-    (r) => r.dataQuality?.enrichment_status !== "ok"
-  ).length;
+  const enrichmentFailed = useMemo(
+    () =>
+      screener.currentRows.filter(
+        (r) => r.dataQuality?.enrichment_status !== "ok"
+      ).length,
+    [screener.currentRows]
+  );
 
   return (
     <div className="flex h-svh flex-col bg-[var(--oc-dark)] text-white">
@@ -109,7 +94,11 @@ export function ScreenPage() {
                 className="bg-white text-[var(--oc-navy)] hover:bg-white/90 gap-2"
               >
                 <Play className="h-4 w-4" />
-                {screener.status === "loading" ? "Loading snapshot…" : "Start Screening"}
+                {screener.status === "loading"
+                  ? "Loading snapshot…"
+                  : screener.status === "error"
+                    ? "Retry"
+                    : "Start Screening"}
               </Button>
             </div>
           ) : (

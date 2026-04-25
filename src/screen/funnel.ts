@@ -178,16 +178,22 @@ export function makeStage(
 
 // ─── Presets ──────────────────────────────────────────────────
 
-const QUESTIONNAIRE_FILTERS: FilterId[] = [
+/**
+ * Filter sequences per preset. **Exported** so the UI can render the
+ * pending stages, drive Next-step logic, and toggle between presets
+ * from a single source of truth. The preset-runner functions below
+ * apply each sequence in order.
+ */
+export const QUESTIONNAIRE_FILTERS: readonly FilterId[] = [
   STAGE_IDS.Q1_MCAP_50M,
   STAGE_IDS.Q2_TOP_100,
   STAGE_IDS.Q3_TURNOVER_20,
   STAGE_IDS.Q4_PROFITABLE,
   STAGE_IDS.Q5_UNPROVEN_TECH,
   STAGE_IDS.Q6_SINGLE_COMMODITY,
-];
+] as const;
 
-const METHODOLOGY_FILTERS: FilterId[] = [
+export const METHODOLOGY_FILTERS: readonly FilterId[] = [
   STAGE_IDS.M1_MCAP_50M,
   STAGE_IDS.M2_PROFITABLE,
   STAGE_IDS.M3_CASHFLOW_POSITIVE,
@@ -195,9 +201,9 @@ const METHODOLOGY_FILTERS: FilterId[] = [
   STAGE_IDS.M5_EXCLUDE_SINGLE_COMMODITY,
   STAGE_IDS.M6_SUFFICIENT_LIQUIDITY,
   STAGE_IDS.M7_EXCLUDE_ASX_100,
-];
+] as const;
 
-function applyPreset(rows: FilterableSecurity[], filters: FilterId[]): Stage[] {
+function applyPreset(rows: FilterableSecurity[], filters: readonly FilterId[]): Stage[] {
   const stages: Stage[] = [makeStage(STAGE_IDS.UNIVERSE, rows)];
   let current = rows;
   for (const f of filters) {

@@ -11,7 +11,7 @@
 |---|---|---|
 | 1. Schema, ingest, reconciliation | ✓ Complete | `c670dd4` (initial), `3e220bb` (review fixes) |
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
-| 3. UI and state | ✓ Complete | (this commit) |
+| 3. UI and state | ✓ Complete | `a0cce22` (initial), `<phase-3-review>` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | Not started | — |
 | 5. Voice and routing | Not started | — |
 | 6. Polish and pitch hardening | Not started | — |
@@ -574,3 +574,19 @@ Code review of phase 2 surfaced four moderate and four minor issues; all closed 
 | Minor | Typos in `data/curation.json` silently did nothing | `loadSnapshot` warns to stderr when curated tickers aren't in the universe |
 | Minor | No test for empty `current.tickers` advancement, no `appliedAt` shape assertion | Two new tests; 29/29 passing |
 | Minor | `resetScreenState` duplicated `initScreenState` | Now delegates (one-line implementation) |
+
+## 15. Review fixes applied during phase 3
+
+Code review of phase 3 surfaced four moderate and three minor issues (plus two documented-only items); all closed in this phase's review-fix commit.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | Invalid `collectedAt` rendered "Snapshot is NaN days old" in StalenessBanner | NaN guard via `Number.isFinite` — bail and render nothing on unparseable date |
+| Moderate | Preset sequences (Questionnaire / Methodology) duplicated between `screen-page.tsx` and `funnel.ts` | Exported `QUESTIONNAIRE_FILTERS` and `METHODOLOGY_FILTERS` from `funnel.ts`; UI imports them; one source of truth |
+| Moderate | `stocks-table` sort + slice ran on every render (≈22K comparisons over 1,979 rows) | `useMemo` keyed on `[rows, sortKey, sortDir]` and `[sorted, showAll, defaultLimit]` |
+| Moderate | `useScreener.applyFilter` could race on rapid programmatic calls | Added `applyInFlightRef` matching the `start()` pattern; `finally`-block reset |
+| Minor | `enrichmentFailed` filter ran on every render in `screen-page` | `useMemo` keyed on `[currentRows]` |
+| Minor | Server-returned stage trusted without verifying `stage.id === filterId` | Throws if mismatched, surfacing as the standard error path (`status` returns to "ready"; banner displays the error) |
+| Minor | Snapshot-fetch error left no retry path | Start button label flips to "Retry" when `status === "error"` |
+| Documented | `dataQuality.enrichment_status` is snake_case in a sea of camelCase | Inherited from the DB jsonb shape; rename would cascade through ingest + storage. Acceptable for v2 |
+| Documented | No tests for `useScreener` or the snapshot route | Phase-3 exit criteria didn't require them; flagged for phase-4 plan |

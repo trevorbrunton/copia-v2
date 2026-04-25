@@ -10,6 +10,14 @@ import { z } from "zod";
 import { STAGE_IDS, type FilterId } from "@/src/screen/funnel";
 import { matchIntentRule } from "@/src/screen/intent-rules";
 import { INTENT_KINDS, type Intent, type IntentKind } from "@/src/screen/intent";
+import {
+  CATEGORY_IDS,
+  FUND_IDS,
+  isCategoryId,
+  isFundId,
+  type CategoryId,
+  type FundId,
+} from "@/src/screen/fund-qa";
 import { logger } from "@/src/lib/logger";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
@@ -57,19 +65,28 @@ Allowed stock-fact fields (for info_stock_field only):
   - market_cap
   - earnings_status
 
+Allowed fund ids (for info_fund_field only):
+${FUND_IDS.map((id) => `  - ${id}`).join("\n")}
+
+Allowed fund categories (for info_fund_field only):
+${CATEGORY_IDS.map((id) => `  - ${id}`).join("\n")}
+
 Output format: a single JSON object with these fields:
-  { "kind": <one of the allowed intents>, "filterId"?: <filter id>, "field"?: <stock-fact field> }
+  { "kind": <one of the allowed intents>, "filterId"?: <filter id>, "field"?: <stock-fact field>, "fundId"?: <fund id>, "category"?: <fund category> }
 
 Rules:
 - Output JSON only. No prose, no code fences, no commentary.
 - "filterId" is required only when kind is "apply_filter".
 - "field" is allowed only when kind is "info_stock_field" and is optional.
+- "fundId" and "category" are allowed only when kind is "info_fund_field"; both are optional but at least one should be present.
 - If the user's intent cannot be matched, output { "kind": "fallback" }.`;
 
 const ResponseSchema = z.object({
   kind: z.enum(INTENT_KINDS as readonly [IntentKind, ...IntentKind[]]),
   filterId: z.string().optional(),
   field: z.enum(["share_price", "market_cap", "earnings_status"]).optional(),
+  fundId: z.string().optional(),
+  category: z.string().optional(),
 });
 
 const VALID_FILTER_IDS = new Set<string>(Object.values(STAGE_IDS).filter((id) => id !== "universe"));
@@ -127,7 +144,7 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
   const result = ResponseSchema.safeParse(parsed);
   if (!result.success) return { kind: "fallback" };
 
-  const { kind, filterId, field } = result.data;
+  const { kind, filterId, field, fundId, category } = result.data;
 
   switch (kind) {
     case "apply_filter": {
@@ -136,6 +153,17 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
     }
     case "info_stock_field":
       return { kind: "info_stock_field", field };
+    case "info_fund_field": {
+      // Validate any optional fundId / category against the bank.
+      // Invalid values are dropped (the dispatcher fills from UI state).
+      const validFund: FundId | undefined =
+        fundId && isFundId(fundId) ? fundId : undefined;
+      const validCategory: CategoryId | undefined =
+        category && isCategoryId(category) ? category : undefined;
+      // If both came back invalid we have nothing useful; degrade.
+      if (!validFund && !validCategory) return { kind: "fallback" };
+      return { kind: "info_fund_field", fundId: validFund, category: validCategory };
+    }
     case "next_step":
       return { kind: "next_step" };
     case "apply_initial_screen":

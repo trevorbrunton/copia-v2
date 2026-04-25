@@ -123,3 +123,23 @@ export function describeFunnelComplete(): string {
 export function describeOpening(): string {
   return `Hi — I'm Pep. Say "run the OC initial screen" to get started.`;
 }
+
+/**
+ * Narration for an `info_fund_field` intent that resolved to a specific
+ * answer in `data/fund-qa.json`. The category label is dropped from the
+ * spoken line — the answer is self-contained — but the fund name is
+ * prepended so the listener has context.
+ */
+export function describeFundFact(fundDisplayName: string, answer: string): string {
+  return `${fundDisplayName}: ${answer}`;
+}
+
+/** Narration when `info_fund_field` couldn't resolve a fund (e.g. user only said "what are the fees?" without naming a fund). */
+export function describeFundFactMissingFund(): string {
+  return `Which fund did you mean — Mid-Cap, Micro-Cap, or Premium Small Companies?`;
+}
+
+/** Narration when `info_fund_field` resolved a fund but no recognised category. */
+export function describeFundFactMissingCategory(fundDisplayName: string): string {
+  return `What would you like to know about ${fundDisplayName}? You can ask about the strategy, fees, minimum investment, distributions, or other details.`;
+}

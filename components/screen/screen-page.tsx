@@ -99,17 +99,21 @@ export function ScreenPage() {
   // One-shot opener: spoken when both the avatar reaches `ready` AND the
   // snapshot has loaded, so the audience hears the cloned voice and a
   // hint of what to ask. Guarded by a ref so an avatar reconnect mid-
-  // session doesn't replay the greeting.
+  // session doesn't replay the greeting. The state-touching work is
+  // queued via `queueMicrotask` so it runs after the effect completes
+  // (React 19 forbids setState inside an effect's synchronous body).
   const openingSpokenRef = useRef(false);
   useEffect(() => {
     if (openingSpokenRef.current) return;
     if (tavusAvatar.status !== "ready") return;
     if (!screener.snapshot) return;
     openingSpokenRef.current = true;
-    const greeting = describeOpening();
-    appendTranscript("assistant", greeting);
-    tavusAvatar.echo(greeting).catch((err) => {
-      console.warn("[screen] tavus opening echo failed:", err);
+    queueMicrotask(() => {
+      const greeting = describeOpening();
+      appendTranscript("assistant", greeting);
+      tavusAvatar.echo(greeting).catch((err) => {
+        console.warn("[screen] tavus opening echo failed:", err);
+      });
     });
   }, [tavusAvatar, screener.snapshot, appendTranscript]);
 

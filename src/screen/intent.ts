@@ -14,6 +14,7 @@
  * matched (entity-resolver.ts).
  */
 import type { FilterId } from "@/src/screen/funnel";
+import type { CategoryId, FundId } from "@/src/screen/fund-qa";
 
 export type StockFactField = "share_price" | "market_cap" | "earnings_status";
 
@@ -36,6 +37,13 @@ export type Intent =
   | { kind: "monitoring_enable_daily" }
   /** Reset the funnel back to universe. */
   | { kind: "restart" }
+  /**
+   * Multi-fund Q&A: "what are the OC mid-cap fund's fees?". The dispatcher
+   * looks up `fund-qa.json` for the matching `{ fundId, category }`. Both
+   * fields are optional — the rule layer fills what it can detect; the UI
+   * dispatcher fills the missing axis from the active fund-mode selection.
+   */
+  | { kind: "info_fund_field"; fundId?: FundId; category?: CategoryId }
   /** Out-of-scope or ambiguous; the avatar offers a polite refusal. */
   | { kind: "fallback" };
 
@@ -51,5 +59,6 @@ export const INTENT_KINDS: readonly IntentKind[] = [
   "info_portfolio_overlap",
   "monitoring_enable_daily",
   "restart",
+  "info_fund_field",
   "fallback",
 ] as const;

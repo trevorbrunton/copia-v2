@@ -11,11 +11,120 @@
  */
 import { STAGE_IDS } from "@/src/screen/funnel";
 import type { Intent } from "@/src/screen/intent";
+import type { CategoryId, FundId } from "@/src/screen/fund-qa";
 
 type Rule = {
   pattern: RegExp;
-  build: () => Intent;
+  /**
+   * Most rules return a fixed Intent. Fund-info needs the text to
+   * extract `fundId` + `category` from the same string the pattern
+   * matched against. Returns null when the rule's pattern matched but
+   * the deeper extraction failed (e.g. fund mentioned but nothing
+   * useful otherwise) — caller continues to the next rule.
+   */
+  build: (text: string) => Intent | null;
 };
+
+// ─── Fund-info detection helpers ────────────────────────────────────
+//
+// Used by `matchFundInfoRule` further down. The rule only fires when a
+// fund name is unambiguously present — partial matches (category alone)
+// would clobber the screening dispatch (e.g. "what are the fees" mid-
+// session has nothing to do with fund-info).
+//
+// Order matters: more specific names first so e.g. "premium small" beats
+// "small companies" beats anything containing "small".
+
+const FUND_PATTERNS: Array<[RegExp, FundId]> = [
+  [
+    /\b(?:oc[\s-]+)?premium[\s-]+small[\s-]+(?:companies|cos?)\b|\bpremium[\s-]+small\b/i,
+    "premium_small",
+  ],
+  [/\b(?:oc[\s-]+)?small[\s-]+(?:companies|cos?)\b/i, "premium_small"],
+  [/\b(?:oc[\s-]+)?micro[\s-]?cap\b/i, "micro_cap"],
+  [/\b(?:oc[\s-]+)?mid[\s-]?cap\b/i, "mid_cap"],
+];
+
+// Specific patterns first so e.g. "performance fees" matches that
+// category instead of falling through to the generic `performance` row.
+const CATEGORY_PATTERNS: Array<[RegExp, CategoryId]> = [
+  [/\bperformance\s+fees?\b|\bincentive\s+fees?\b/i, "performance_fees"],
+  [/\bmanagement\s+fees?\b|\bannual\s+fees?\b|\bongoing\s+fees?\b|\bMER\b/i, "management_fees"],
+  [/\btransaction\s+costs?\b|\bbuy[/\s-]?sell\b|\bspread\b|\bbrokerage\b/i, "transaction_costs"],
+  [/\b(?:fees?|costs?|charges?)\b/i, "management_fees"],
+  [
+    /\bminimum\s+(?:investment|amount|balance)\b|\bsmallest\s+investment\b|\bhow\s+much.*\binvest\b|\bhow\s+much\s+do\s+i\s+need\b/i,
+    "minimum_investment",
+  ],
+  [/\bdistributions?\b|\bpayouts?\b|\bincome\s+payment\b/i, "distributions"],
+  [
+    /\bwithdraw|\bredempt|\bexit\b|\bcash\s+out\b|\bsell\s+out\b|\btake\s+out\b/i,
+    "withdrawals",
+  ],
+  [/\bcooling[\s-]?off\b|\bcancel.*invest|\bright\s+to\s+cancel\b/i, "cooling_off"],
+  [/\babout\s+copia\b|\bresponsible\s+entity\b|\bcopia\s+investment\s+partners\b/i, "about_copia"],
+  [
+    /\babout\s+(?:OC|the\s+manager)\b|\bwho\s+(?:is\s+OC|manages|runs)\b|\binvestment\s+manager\b|\bteam\b|\bpeople\b/i,
+    "about_oc",
+  ],
+  [
+    /\bhow\s+(?:do\s+i|to|can\s+i)\s+(?:apply|invest|sign\s+up|start|join|buy)\b|\bapplication\s+process\b/i,
+    "how_to_apply",
+  ],
+  [/\btax(?:es|ation)?\b|\bAMIT\b/i, "tax"],
+  [/\bESG\b|\benvironmental.*social\b|\bethical\b|\bsustainabilit/i, "esg"],
+  [/\bperformance\b|\breturns?\b|\bhow\s+(?:has|did|is)\s+.*perform/i, "performance"],
+  [/\bobjective\b|\btarget\s+return\b|\baims?\s+to\b|\bgoal\b|\boutperform/i, "investment_objective"],
+  [
+    /\bstrateg(?:y|ies)\b|\bapproach\b|\bhow\s+(?:does|do)\s+.*(?:pick|select|choose|invest)\b|\bphilosophy\b|\bmethod\b/i,
+    "investment_strategy",
+  ],
+  [
+    /\b(?:investment\s+)?universe\b|\bwhat\s+(?:does|do).*invest\s+in\b|\bwhat\s+(?:companies|stocks?)\b/i,
+    "investment_universe",
+  ],
+  [
+    /\basset\s+allocation\b|\bportfolio\s+composition\b|\bhow\s+much\s+(?:in\s+)?cash\b|\bcash\s+(?:weighting|level)\b/i,
+    "asset_allocation",
+  ],
+  [
+    /\btime[\s-]?frame\b|\btime\s+horizon\b|\bhow\s+long\b|\binvestment\s+period\b|\bholding\s+period\b/i,
+    "investment_timeframe",
+  ],
+  [/\brisks?(?:\s+level|\s+profile)?\b|\bhow\s+risky\b|\bvolatility\b/i, "risk_level"],
+  [
+    /\btarget\s+market\b|\bwho.*(?:suit|appropriate|suited\s+for)\b|\bright\s+for\b|\bwho\s+is\s+(?:it|this).*\s+for\b/i,
+    "target_market",
+  ],
+  [
+    /\b(?:tell\s+me\s+about|what\s+is|describe|details?\s+about|overview|about\s+the)\b/i,
+    "fund_overview",
+  ],
+];
+
+function extractFundId(text: string): FundId | null {
+  for (const [re, id] of FUND_PATTERNS) if (re.test(text)) return id;
+  return null;
+}
+
+function extractCategoryId(text: string): CategoryId | null {
+  for (const [re, id] of CATEGORY_PATTERNS) if (re.test(text)) return id;
+  return null;
+}
+
+/**
+ * Fire `info_fund_field` only when a fund name is detected. Without an
+ * explicit fund mention we can't disambiguate from screening-mode
+ * questions like "what are the fees?". Defaults the category to
+ * `fund_overview` when only the fund name appears (e.g. "tell me about
+ * the OC mid-cap fund").
+ */
+function matchFundInfoRule(text: string): Intent | null {
+  const fundId = extractFundId(text);
+  if (!fundId) return null;
+  const category = extractCategoryId(text) ?? "fund_overview";
+  return { kind: "info_fund_field", fundId, category };
+}
 
 /**
  * Patterns are matched against the lowercased + trimmed utterance.
@@ -125,6 +234,16 @@ const RULES: Rule[] = [
     build: () => ({ kind: "info_portfolio_overlap" }),
   },
 
+  // ─── Fund Q&A (info_fund_field) ─────────────────────────────────
+  // Only fires when a fund name is present (mid-cap, micro-cap, premium
+  // small companies). Runs BEFORE the generic stock-fact patterns so
+  // "OC mid-cap fund's market cap" routes to fund-info, but AFTER the
+  // specific filter rules so "market cap > 50m" still hits Q1.
+  {
+    pattern: /\b(?:mid[\s-]?cap|micro[\s-]?cap|small[\s-]+(?:companies|cos?))\b/i,
+    build: matchFundInfoRule,
+  },
+
   // ─── Stock-fact (info_stock_field) — runs after the funnel rules ─
   {
     pattern: /\b(?:share\s+price|trading\s+at|price\s+of|how\s+much\s+is)\b/,
@@ -174,7 +293,12 @@ export function matchIntentRule(utterance: string): Intent | null {
   const text = utterance.toLowerCase().trim();
   if (text.length === 0) return null;
   for (const rule of RULES) {
-    if (rule.pattern.test(text)) return rule.build();
+    if (!rule.pattern.test(text)) continue;
+    const built = rule.build(text);
+    if (built) return built;
+    // Pattern matched but deeper extraction declined (e.g. fund-info
+    // pattern hit but no fund name resolved on closer inspection) —
+    // continue checking remaining rules.
   }
   return null;
 }

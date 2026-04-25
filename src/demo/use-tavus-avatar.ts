@@ -404,6 +404,12 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
       endConversation(convId);
       conversationIdRef.current = null;
     }
+
+    // User-initiated stop is the explicit "fresh slate" signal — clear
+    // the one-shot reconnect guard so the next initAvatar() session
+    // gets its own reconnect budget. Don't reset in initAvatar itself,
+    // which would clobber the guard during tryReconnect's chained init.
+    reconnectAttemptedRef.current = false;
   }, []);
 
   // Cleanup on unmount + on tab close. The unmount path covers React

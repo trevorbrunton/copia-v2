@@ -34,7 +34,18 @@ const buckets = new Map<string, Bucket>();
 // Cap the bucket count so an attacker rotating IPs can't exhaust memory.
 // When we hit the soft cap, drop buckets that haven't been touched within
 // the longest window we've ever seen.
-const MAX_BUCKETS = 10_000;
+let maxBuckets = 10_000;
+
+// Each route passes the same readonly RATE_LIMITS array on every call;
+// caching `longest` by reference avoids the per-request `Math.max` spread.
+const longestByWindows = new WeakMap<readonly RateLimitWindow[], number>();
+function longestWindow(windows: readonly RateLimitWindow[]): number {
+  const cached = longestByWindows.get(windows);
+  if (cached !== undefined) return cached;
+  const longest = Math.max(...windows.map((w) => w.windowMs));
+  longestByWindows.set(windows, longest);
+  return longest;
+}
 
 /**
  * Check a key against a list of windows. Throws `TooManyRequestsError`
@@ -48,11 +59,11 @@ export function checkRateLimit(
   if (windows.length === 0) return;
 
   const now = Date.now();
-  const longest = Math.max(...windows.map((w) => w.windowMs));
+  const longest = longestWindow(windows);
 
   let bucket = buckets.get(key);
   if (!bucket) {
-    if (buckets.size >= MAX_BUCKETS) sweep(now);
+    if (buckets.size >= maxBuckets) sweep(now);
     bucket = { events: [], lastSeen: now };
     buckets.set(key, bucket);
   }
@@ -108,4 +119,18 @@ function sweep(now: number): void {
 /** Reset all buckets — for tests only. */
 export function _resetRateLimitForTests(): void {
   buckets.clear();
+}
+
+/**
+ * Override the bucket-count cap — tests only. Lets the sweep path be
+ * exercised without writing 10K bucket fixtures. Resets back to the
+ * production default when called with no argument.
+ */
+export function _setMaxBucketsForTests(n?: number): void {
+  maxBuckets = n ?? 10_000;
+}
+
+/** Inspect bucket count — tests only. */
+export function _bucketCountForTests(): number {
+  return buckets.size;
 }

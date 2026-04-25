@@ -34,6 +34,11 @@ const REQUIREMENTS: EnvRequirement[] = [
     name: "TAVUS_REPLICA_ID",
     reason: "avatar replica selection (Tavus uses persona default if absent)",
   },
+  {
+    name: "NEXT_PUBLIC_TAVUS_PERSONA_ID",
+    reason:
+      "Pep persona id — /demo/screen silently runs in transcript-only mode if unset (must be a `pipeline_mode: \"echo\"` persona; see docs/TAVUS-PERSONA-SETUP.md)",
+  },
   // Database — fatal if unset.
   {
     name: "DATABASE_URL",

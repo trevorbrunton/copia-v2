@@ -11,6 +11,14 @@
  * Single-process by design — same caveat as the rate limiter: each
  * Vercel/Node instance has its own copy. The TTL keeps memory bounded
  * and lets a fresh ingest land within a minute.
+ *
+ * **Layered caching note.** `/api/v1/screen/snapshot` also sets
+ * `Cache-Control: s-maxage=300, stale-while-revalidate=3600` so Vercel's
+ * edge fronts the route. The edge cache (5 min) intentionally outlives
+ * this in-process cache (60s). Worst-case staleness as observed by a
+ * client is the edge layer's 5 min — fine for daily-cadence snapshots,
+ * and re-ingesting mid-pitch already requires a deliberate redeploy or
+ * server restart anyway.
  */
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/src/db";

@@ -74,15 +74,39 @@ export function ScreenPage() {
     ]);
   }, []);
 
-  // Run the entire methodology preset in sequence so the rail animates
-  // through every stage (each call is one round trip — fine for v2).
+  /**
+   * Run a filter and report the outcome on the transcript. If
+   * `screener.applyFilter` set an error, surface that instead of the
+   * default success line.
+   */
+  const applyAndNarrate = useCallback(
+    async (filterId: FilterId) => {
+      const errBefore = screener.error;
+      await screener.applyFilter(filterId);
+      const errAfter = screener.error;
+      // If a NEW error appeared, narrate failure rather than success.
+      if (errAfter && errAfter !== errBefore) {
+        appendTranscript("assistant", `Couldn't apply ${STAGE_LABELS[filterId]}: ${errAfter}.`);
+        return false;
+      }
+      appendTranscript("assistant", `Applied ${STAGE_LABELS[filterId]}.`);
+      return true;
+    },
+    [screener, appendTranscript]
+  );
+
+  /**
+   * Run the entire methodology preset. Resets the funnel first so the
+   * rail starts cleanly from universe — otherwise stages from a
+   * mid-questionnaire run would mix with the methodology stages.
+   */
   const runInitialScreen = useCallback(async () => {
+    if (screener.stages.length > 1) screener.reset();
     for (const f of METHODOLOGY_FILTERS) {
-      // Skip ones that are already in the stages list (e.g. universe is always there).
-      if (screener.stages.some((s) => s.id === f)) continue;
-      await screener.applyFilter(f);
+      const ok = await applyAndNarrate(f);
+      if (!ok) break; // bail on first failure
     }
-  }, [screener]);
+  }, [screener, applyAndNarrate]);
 
   /** Convert an Intent into a UI action + a narration line. */
   const handleIntent = useCallback(
@@ -90,19 +114,14 @@ export function ScreenPage() {
       switch (intent.kind) {
         case "next_step": {
           if (nextFilter) {
-            await screener.applyFilter(nextFilter);
-            appendTranscript("assistant", `Applied ${STAGE_LABELS[nextFilter]}.`);
+            await applyAndNarrate(nextFilter);
           } else {
             appendTranscript("assistant", "The funnel is already complete. Try Reset to start over.");
           }
           break;
         }
         case "apply_filter": {
-          await screener.applyFilter(intent.filterId);
-          appendTranscript(
-            "assistant",
-            `Applied ${STAGE_LABELS[intent.filterId]}.`
-          );
+          await applyAndNarrate(intent.filterId);
           break;
         }
         case "apply_initial_screen": {
@@ -206,7 +225,7 @@ export function ScreenPage() {
       // `text` is unused here but reserved for future narration that may quote the user.
       void text;
     },
-    [screener, nextFilter, preset, runInitialScreen, appendTranscript]
+    [screener, nextFilter, preset, runInitialScreen, appendTranscript, applyAndNarrate]
   );
 
   const ask = useCallback(

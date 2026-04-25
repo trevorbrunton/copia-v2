@@ -4,6 +4,7 @@ import { handleAppError } from "@/src/server/errors";
 import { logger } from "@/src/lib/logger";
 import { db } from "@/src/db";
 import { ocHoldings } from "@/src/db/screen-schema";
+import { parseNumeric } from "@/src/screen/numeric";
 
 /**
  * POST /api/v1/screen/portfolio-overlap
@@ -25,8 +26,9 @@ import { ocHoldings } from "@/src/db/screen-schema";
  * carries the `isSample` flag so the avatar/UI can label answers.
  */
 
+// Max ~ universe size (1,979 today). 2_000 is a comfortable defensive cap.
 const BodySchema = z.object({
-  fromTickers: z.array(z.string()),
+  fromTickers: z.array(z.string().min(1).max(10)).max(2_000),
 });
 
 export async function POST(req: Request) {
@@ -85,8 +87,8 @@ export async function POST(req: Request) {
 
     const project = (h: (typeof latest)[number]) => ({
       ticker: h.ticker,
-      weightPct: h.weightPct === null ? null : Number(h.weightPct),
-      marketValueAud: h.marketValueAud === null ? null : Number(h.marketValueAud),
+      weightPct: parseNumeric(h.weightPct),
+      marketValueAud: parseNumeric(h.marketValueAud),
       sector: h.sector,
     });
 

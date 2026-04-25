@@ -12,6 +12,7 @@ import { GET as snapshotGET } from "@/app/api/v1/screen/snapshot/route";
 import { POST as applyFilterPOST } from "@/app/api/v1/screen/apply-filter/route";
 import { POST as stockFactPOST } from "@/app/api/v1/screen/stock-fact/route";
 import { POST as processPOST } from "@/app/api/v1/screen/process/route";
+import { POST as portfolioOverlapPOST } from "@/app/api/v1/screen/portfolio-overlap/route";
 
 const SHOULD_RUN = !!process.env.DATABASE_URL;
 
@@ -154,5 +155,45 @@ describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/process", () => {
   it("rejects empty/missing text with 400", async () => {
     expect((await processPOST(jsonRequest({ text: "" }))).status).toBe(400);
     expect((await processPOST(jsonRequest({}))).status).toBe(400);
+  });
+});
+
+describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/portfolio-overlap", () => {
+  it("partitions sample holdings into matching / nonMatching by ticker presence", async () => {
+    // Three holdings present in the shortlist, the rest absent.
+    const res = await portfolioOverlapPOST(
+      jsonRequest({ fromTickers: ["MIN", "CHC", "ORI"] })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      portfolioLabel: string;
+      isSample: boolean;
+      matching: Array<{ ticker: string }>;
+      nonMatching: Array<{ ticker: string }>;
+      totalHoldings: number;
+    };
+    expect(body.isSample).toBe(true);
+    expect(body.totalHoldings).toBe(10); // The 10 supplied sample holdings
+    expect(body.matching.map((m) => m.ticker).sort()).toEqual(["CHC", "MIN", "ORI"]);
+    expect(body.nonMatching.length).toBe(7);
+  });
+
+  it("returns all holdings as nonMatching when fromTickers is empty", async () => {
+    const res = await portfolioOverlapPOST(jsonRequest({ fromTickers: [] }));
+    const body = (await res.json()) as {
+      matching: unknown[];
+      nonMatching: unknown[];
+      totalHoldings: number;
+    };
+    expect(body.matching.length).toBe(0);
+    expect(body.nonMatching.length).toBe(body.totalHoldings);
+  });
+
+  it("rejects oversized fromTickers payload with 400", async () => {
+    const big = Array.from({ length: 2_001 }, (_, i) => `T${i}`);
+    const res = await portfolioOverlapPOST(jsonRequest({ fromTickers: big }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 });

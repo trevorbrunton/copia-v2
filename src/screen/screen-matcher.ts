@@ -127,13 +127,28 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
 
   const { kind, filterId, field } = result.data;
 
-  if (kind === "apply_filter") {
-    if (!filterId || !VALID_FILTER_IDS.has(filterId)) return { kind: "fallback" };
-    return { kind: "apply_filter", filterId: filterId as FilterId };
+  switch (kind) {
+    case "apply_filter": {
+      if (!filterId || !VALID_FILTER_IDS.has(filterId)) return { kind: "fallback" };
+      return { kind: "apply_filter", filterId: filterId as FilterId };
+    }
+    case "info_stock_field":
+      return { kind: "info_stock_field", field };
+    case "next_step":
+      return { kind: "next_step" };
+    case "apply_initial_screen":
+      return { kind: "apply_initial_screen" };
+    case "output_show":
+      return { kind: "output_show" };
+    case "output_email":
+      return { kind: "output_email" };
+    case "info_portfolio_overlap":
+      return { kind: "info_portfolio_overlap" };
+    case "monitoring_enable_daily":
+      return { kind: "monitoring_enable_daily" };
+    case "restart":
+      return { kind: "restart" };
+    case "fallback":
+      return { kind: "fallback" };
   }
-  if (kind === "info_stock_field") {
-    return { kind: "info_stock_field", field };
-  }
-  // All other kinds are nullary
-  return { kind } as Intent;
 };

@@ -13,7 +13,7 @@
 | 2. Screening engine | ✓ Complete | `0661fbd` (initial), `3c9cba4` (review fixes) |
 | 3. UI and state | ✓ Complete | `a0cce22` (initial), `da08c2d` (review fixes) |
 | 4. Stock-fact provider (snapshot-backed) | ✓ Complete | `191e47f` (initial), `927b5f0` (review fixes) |
-| 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` |
+| 5. Voice and routing | ✓ Complete (text mode) — voice + Tavus deferred to phase 6 | `d861794` (initial), `<phase-5-review>` (review fixes) |
 | 6. Polish and pitch hardening | Not started | — |
 | 7. v1 code decommission | Not started | — |
 
@@ -629,3 +629,18 @@ Code review of phase 4 surfaced one moderate and three minor issues (plus two do
 | Minor | `apply-filter` body validation untested for `fromTickers: [non-string]` | Test added; Zod confirmed to reject with 400 |
 | Documented | `getStockFact` makes two sequential DB queries | Could be one with a subquery; performance fine at v2 scale, defer |
 | Documented | No tests for `useScreener` or `StockFactPanel` | Routes are covered now; hook + component still uncovered. Raise for phase 5 |
+
+## 17. Review fixes applied during phase 5
+
+Code review of phase 5 surfaced four moderate and two minor issues (plus two documented-only items); all closed.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | Running `apply_initial_screen` mid-questionnaire appended methodology stages on top of existing questionnaire stages — funnel rail mixed both presets | `runInitialScreen` now resets the funnel first (when `stages.length > 1`) so the rail starts cleanly from universe |
+| Moderate | Dispatcher narrated "Applied X." even when `screener.applyFilter` set an error internally | New `applyAndNarrate` helper observes `screener.error` before/after each call; on a new error it posts the failure line and (in the methodology preset) bails out of the chain |
+| Moderate | `/portfolio-overlap` body had no `fromTickers` length cap — defensive abuse vector | `.max(2000)` matches universe size; verified 400 on oversized payload |
+| Moderate | No tests for `/portfolio-overlap` route | Three integration cases added: matching/non-matching split, empty `fromTickers`, oversized payload validation. **115/115 tests pass** |
+| Minor | `screen-matcher.ts` final return used `as Intent` cast for nullary kinds, bypassing exhaustiveness | Replaced with explicit switch on `kind`; TypeScript now exhaustively narrows each variant |
+| Minor | `/portfolio-overlap` numeric coercion used raw `Number(...)` instead of the shared `parseNumeric` (phase 4 review fix M3 standard) | Swapped in `parseNumeric` |
+| Documented | Within-portfolio `isSample` uniformity assumed but not enforced (`latest[0].isSample` only) | Acceptable per D8 — portfolio rows always share the flag at ingest time |
+| Documented | No tests for the Anthropic classifier fallback path (plan §11 expected fixture-stubbed responses) | Phase 5 exit criteria didn't require it; raise for phase 6 polish |

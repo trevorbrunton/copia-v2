@@ -1,0 +1,20 @@
+{
+  "_comment": "Hand-curated flag overrides for asx_securities. Tickers listed under each key get the flag set to true; everything else defaults to false. Sourced from the OC FSC questionnaire (§2.2) and post-Q4 inspection of the asx_top500_enriched snapshot. Re-run scripts/ingest-asx-snapshot.ts after editing.",
+  "is_single_commodity_or_single_mine": [
+    "NST",
+    "EVN",
+    "PRU",
+    "GMD",
+    "RMS",
+    "SFR",
+    "CSC",
+    "AAI",
+    "LYC",
+    "YAL",
+    "WHC",
+    "WDS",
+    "STO",
+    "ALD"
+  ],
+  "is_unproven_or_complex_tech": []
+}

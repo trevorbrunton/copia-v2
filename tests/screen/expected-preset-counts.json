@@ -1,0 +1,68 @@
+{
+  "_comment": "Expected per-stage counts for the v2 demo presets. Update only when the snapshot or filter rules intentionally change.",
+  "snapshot_date": "2026-04-24",
+  "questionnaire_preset": [
+    {
+      "stage": "universe",
+      "count": 1979
+    },
+    {
+      "stage": "q1_mcap_50m",
+      "count": 940
+    },
+    {
+      "stage": "q2_top_100",
+      "count": 100
+    },
+    {
+      "stage": "q3_turnover_20",
+      "count": 86
+    },
+    {
+      "stage": "q4_profitable",
+      "count": 79
+    },
+    {
+      "stage": "q5_unproven_tech",
+      "count": 79
+    },
+    {
+      "stage": "q6_single_commodity",
+      "count": 65
+    }
+  ],
+  "methodology_preset": [
+    {
+      "stage": "universe",
+      "count": 1979
+    },
+    {
+      "stage": "m1_mcap_50m",
+      "count": 940
+    },
+    {
+      "stage": "m2_profitable",
+      "count": 347
+    },
+    {
+      "stage": "m3_cashflow_positive",
+      "count": 283
+    },
+    {
+      "stage": "m4_exclude_unproven_tech",
+      "count": 283
+    },
+    {
+      "stage": "m5_exclude_single_commodity",
+      "count": 271
+    },
+    {
+      "stage": "m6_sufficient_liquidity",
+      "count": 218
+    },
+    {
+      "stage": "m7_exclude_asx_100",
+      "count": 159
+    }
+  ]
+}

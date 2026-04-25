@@ -3,6 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DailyCall, DailyEventObjectTrack, DailyEventObjectParticipant } from "@daily-co/daily-js";
 
+/**
+ * Best-effort end of a Tavus conversation. `keepalive: true` allows the
+ * request to survive page tear-down (tab close, hard navigation) — a
+ * plain fetch is aborted by the browser on unload, which used to leak
+ * conversations and quietly bill the demo.
+ */
+function endConversation(conversationId: string): void {
+  try {
+    fetch(`/api/demo/tavus/${conversationId}`, {
+      method: "DELETE",
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // No-op — last-ditch effort, never throw from cleanup paths.
+  }
+}
+
 export type TavusAvatarStatus =
   | "idle"
   | "loading"
@@ -311,14 +328,29 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
     // End the conversation server-side (best-effort)
     const convId = conversationIdRef.current;
     if (convId) {
-      fetch(`/api/demo/tavus/${convId}`, { method: "DELETE" }).catch(() => {});
+      endConversation(convId);
       conversationIdRef.current = null;
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount + on tab close. The unmount path covers React
+  // navigations; `pagehide` is the only event that fires reliably across
+  // browsers on tab close / hard navigation, including BFCache transitions.
+  // `keepalive: true` lets the DELETE survive the page tear-down — the
+  // plain fetch the unmount path used to dispatch was being aborted on
+  // unload, which leaked Tavus conversations (= billing).
   useEffect(() => {
+    const onPageHide = () => {
+      const convId = conversationIdRef.current;
+      if (convId) {
+        endConversation(convId);
+        conversationIdRef.current = null;
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+
     return () => {
+      window.removeEventListener("pagehide", onPageHide);
       if (echoFallbackRef.current) {
         clearTimeout(echoFallbackRef.current);
         echoFallbackRef.current = null;
@@ -330,10 +362,9 @@ export function useTavusAvatar(): UseTavusAvatarReturn {
         call.destroy().catch(() => {});
         callRef.current = null;
       }
-      // End conversation server-side on unmount too
       const convId = conversationIdRef.current;
       if (convId) {
-        fetch(`/api/demo/tavus/${convId}`, { method: "DELETE" }).catch(() => {});
+        endConversation(convId);
         conversationIdRef.current = null;
       }
     };

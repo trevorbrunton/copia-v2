@@ -680,3 +680,13 @@ Code review of phase 6 surfaced three moderate and two minor issues (plus two do
 | Minor | `screen-matcher.test.ts` had no case for an `info_stock_field` returned by the classifier nor for a non-rule utterance the classifier classifies as initial-screen | Two cases added; **121/121 tests pass** |
 | Documented | `startSession` runs snapshot load + Tavus init in parallel; no ordering | Cosmetic only — error banner shows if either fails |
 | Documented | `<AvatarVideo>` no `aria-live` region for status changes | Accessibility minor; defer |
+
+## 19. Review fixes applied during phase 7
+
+Code review of phase 7 surfaced a single moderate issue (plus two clean-but-noted items); closed in this phase's review-fix commit.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Moderate | `src/services/demo/` (containing `types.ts` with v1 response-category enums + zod schemas) was missed by the deletion list — pure orphan, no active importer | Deleted the directory; typecheck + 121/121 tests still pass |
+| Documented | Bare `/demo` now 404s (only `/demo/screen` exists) | Acceptable per phase-7 exit criteria; no rewrite added. If old bookmarks need to keep working post-deploy, add `{ source: "/demo", destination: "/demo/screen" }` to `next.config.ts` rewrites |
+| Documented | `next.config.ts` rewrite `/api/demo/:path*` → `/api/v1/demo/:path*` retained | Load-bearing — `src/demo/use-tavus-avatar.ts` still calls `/api/demo/tavus` and `/api/demo/tavus/[id]` (lines 58, 314, 336). Removing the rewrite would break the avatar |

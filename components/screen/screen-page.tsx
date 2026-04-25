@@ -45,7 +45,8 @@ export function ScreenPage() {
   const tavusAvatar = useTavusAvatar();
 
   const [selectedPersona, setSelectedPersona] = useState<string>(
-    PERSONA_OPTIONS[0]?.id ?? ""
+    // Default to the Custom persona; fall back to whatever is first if Custom isn't configured.
+    PERSONA_OPTIONS.find((p) => p.label === "Custom")?.id ?? PERSONA_OPTIONS[0]?.id ?? ""
   );
   const [preset, setPreset] = useState<Preset>("questionnaire");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);

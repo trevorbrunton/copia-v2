@@ -1,0 +1,32 @@
+{
+  "_comment": "OC investment process Q&A bank. Source: docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt (Sections 1.1-1.5 and 2.1-2.19). Manually curated for spoken delivery — keep answers to 1-3 sentences (~20-30 sec each).",
+  "lastUpdated": "2026-04-26",
+  "topicLabels": {
+    "philosophy": "Investment philosophy",
+    "style": "Investment style",
+    "universe": "Investable universe",
+    "research": "Research effort",
+    "stock_selection": "Stock selection process",
+    "portfolio_construction": "Portfolio construction",
+    "risk_management": "Risk management",
+    "esg": "ESG integration",
+    "corporate_governance": "Corporate governance",
+    "transaction_costs": "Transaction cost management",
+    "tax": "Tax management",
+    "team": "Investment team"
+  },
+  "answers": {
+    "philosophy": "OC believe that equity markets are emotional, backward-looking and inefficient — which means the intrinsic value of many businesses isn't always reflected in the share price. They take a bottom-up, benchmark-unaware approach, assessing each company on its own merits rather than its index weight, and target securities trading below intrinsic value with sound long-term fundamentals.",
+    "style": "OC are style-neutral with a stock-specific bottom-up approach. They invest for value, growth, yield or some combination — they don't track any particular index, so tracking error is expected to be high. They focus on smaller companies outside the ASX 100 because they're easier to understand and offer better growth opportunities.",
+    "universe": "OC's mandate covers all securities listed or about to list on the ASX. They typically exclude stocks under fifty million dollars in market cap, companies that aren't profitable and cash-flow positive, single-commodity or single-mine miners, unprofitable biotechnology stocks, and listed investment companies. The investable universe for the OC Premium Small Companies Fund is currently around four hundred and fifty stocks.",
+    "research": "The investment team attends roughly one thousand company visits and presentations each year — analysis is done internally, with external research used only to expand understanding. Broker recommendations and target prices are not used as inputs into any of OC's processes. Research feeds into two formal outputs: the Operational Risk Assessment and the Valuation.",
+    "stock_selection": "After the initial screen removes companies that are too small, unprofitable, single-commodity or insufficiently liquid, each survivor is scored from one to five on the Operational Risk Assessment — covering management, business model, operating history, industry structure, corporate structure and financial analysis. The Valuation Assessment then ranks expected total return over twelve months, and only stocks with at least eight percent expected return qualify for portfolio inclusion.",
+    "portfolio_construction": "A proprietary target weighting matrix combines the ORA quality score and the Valuation score to suggest stock weights between one point seven and eight percent. Holdings are rarely more than one percent off the matrix's suggestion, and no position can exceed two weeks of average daily turnover for that stock. Cash isn't allocated strategically — it's the residual after investments have been made, capped at twenty percent.",
+    "risk_management": "Risk management is built into every stock decision via the Operational Risk Assessment, which screens out lower-quality companies before valuation is even considered. A monthly Risk Management Committee, chaired by Bruce Loveday, provides a macro overlay on the bottom-up process — reviewing sector and stock weightings, liquidity, public policy, and global market influences.",
+    "esg": "OC are not a UNPRI signatory, but they have a formal ESG charter and integrated ESG into the investment process in 2013. ESG factors are considered in company scoring and impact portfolio weights, but there are no hard negative or positive screens — assessments are stock-specific. ESG factors also flow into voting decisions through the ISS Proxy Exchange.",
+    "corporate_governance": "OC vote on every matter they're eligible to vote on, in the best interests of unitholders, conducted online via the ISS Proxy Exchange. Corporate governance issues are explicitly assessed in every Operational Risk Assessment under Corporate Structure and Board. Issues are raised directly with the company's Managing Director or Chairman — if not resolved, the holding is typically sold.",
+    "transaction_costs": "OC employed a full-time dealer in 2005 to execute trades efficiently and minimise costs. They use a mix of full-service and discount brokers, with current rates ranging from zero point zero five to zero point three percent. Brokerage allocation is reviewed quarterly and adjusted based on quality of service, deal flow, corporate access, and stock flow.",
+    "tax": "After-tax returns are available for common Australian tax structures and rates. The investment team considers Australian tax consequences such as the forty-five-day franking rule and the one-year capital gains discount, but these aren't primary drivers of investment decisions. Tax parcels are allocated on a maximum-loss, minimum-gain basis by the fund administrators.",
+    "team": "The Australian Equities team is led by Robert Frost as Head of Australian Equities, based in Melbourne. The Risk Management Committee, added in December 2009, is chaired by Bruce Loveday — providing the macro overlay on the bottom-up process. The OC proprietary investment software, which encapsulates the entire process from data feeds to portfolio construction, was developed in-house by Stephen Evans in early 2010."
+  }
+}

@@ -15,16 +15,15 @@
  */
 import type { FilterId } from "@/src/screen/funnel";
 import type { CategoryId, FundId } from "@/src/screen/fund-qa";
+import type { ProcessTopicId } from "@/src/screen/process-qa";
 
 export type StockFactField = "share_price" | "market_cap" | "earnings_status";
 
 export type Intent =
-  /** Apply a specific named filter from either preset. */
+  /** Apply a specific named filter from the questionnaire preset. */
   | { kind: "apply_filter"; filterId: FilterId }
   /** Advance to the next filter in the active preset (handled client-side). */
   | { kind: "next_step" }
-  /** Run the OC initial screen — applies the methodology preset end-to-end. */
-  | { kind: "apply_initial_screen" }
   /** "Show me the list" — render the current shortlist in the table. */
   | { kind: "output_show" }
   /** "Email it to me" — mocked toast confirmation, no real email (D9). */
@@ -44,6 +43,13 @@ export type Intent =
    * dispatcher fills the missing axis from the active fund-mode selection.
    */
   | { kind: "info_fund_field"; fundId?: FundId; category?: CategoryId }
+  /**
+   * OC investment process Q&A: "how does OC manage risk?", "what's their
+   * research process?". The dispatcher looks up `process-qa.json` for the
+   * matching topic. `topic` is optional — when missing, the dispatcher
+   * prompts the user to pick one (or click a panel button).
+   */
+  | { kind: "info_process_field"; topic?: ProcessTopicId }
   /** Out-of-scope or ambiguous; the avatar offers a polite refusal. */
   | { kind: "fallback" };
 
@@ -52,7 +58,6 @@ export type IntentKind = Intent["kind"];
 export const INTENT_KINDS: readonly IntentKind[] = [
   "apply_filter",
   "next_step",
-  "apply_initial_screen",
   "output_show",
   "output_email",
   "info_stock_field",
@@ -60,5 +65,6 @@ export const INTENT_KINDS: readonly IntentKind[] = [
   "monitoring_enable_daily",
   "restart",
   "info_fund_field",
+  "info_process_field",
   "fallback",
 ] as const;

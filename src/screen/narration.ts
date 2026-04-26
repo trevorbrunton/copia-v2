@@ -142,35 +142,6 @@ export function describeQuestionnaireIntro(): string {
   return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC is a benchmark-unaware Australian equities manager — they take a stock-specific, bottom-up approach and assess each company on its own merits, not its index weight. The methodology I'll walk you through filters out a few categories of company by design: those that are too small, unprofitable, too speculative, or insufficiently liquid. I'll apply each criterion one at a time so you can see how the universe narrows.`;
 }
 
-/**
- * Spoken introduction for the OC methodology preset.
- * Source: docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt §2.9
- * (Initial Screen) + §2.7 (universe exclusions). Spoken once per
- * session per preset, doubles as the session greeting (no separate
- * opener fires before this).
- */
-export function describeMethodologyIntro(): string {
-  return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC's investable universe is defined by an initial screen that removes companies they consider unsuitable — too small, not profitable or cash-flow positive, single-commodity miners, complex or unproven technology, illiquid names, and the ASX 100 since OC is a small-cap manager. What's left is the starting point for the OC Premium Small Companies Fund. I'll walk you through that screen step by step — click Next to move through each filter.`;
-}
-
-/**
- * Brief transition spoken when the user toggles to the OC methodology
- * mid-session (after running the questionnaire). Skips the full intro
- * — the audience has already heard the philosophy framing — and just
- * cues the comparison.
- */
-export function describeMethodologyTransition(): string {
-  return `Now let's compare the full OC Funds stock filtering process.`;
-}
-
-/**
- * Brief transition spoken when the user toggles back to the
- * questionnaire mid-session.
- */
-export function describeQuestionnaireTransition(): string {
-  return `Back to the questionnaire walk-through. Click Next to step through it.`;
-}
-
 /** Narration when the funnel is already complete and `next_step` is asked. */
 export function describeFunnelComplete(): string {
   return `The funnel is already complete. Try Reset to start over.`;
@@ -194,4 +165,28 @@ export function describeFundFactMissingFund(): string {
 /** Narration when `info_fund_field` resolved a fund but no recognised category. */
 export function describeFundFactMissingCategory(fundDisplayName: string): string {
   return `What would you like to know about ${fundDisplayName}? You can ask about the strategy, fees, minimum investment, distributions, or other details.`;
+}
+
+/**
+ * Narration for an `info_process_field` intent that resolved to a topic
+ * in `data/process-qa.json`. The topic label is dropped from the spoken
+ * line — the answer is self-contained — but a brief lead-in keeps Pep
+ * conversational rather than just dumping the answer.
+ */
+export function describeProcessFact(topicLabel: string, answer: string): string {
+  return `On ${topicLabel.toLowerCase()}: ${answer}`;
+}
+
+/** Narration when `info_process_field` couldn't resolve a topic. */
+export function describeProcessFactMissingTopic(): string {
+  return `What about the OC process would you like to know? You can ask about the investment philosophy, research, stock selection, risk management, ESG, or click any topic in the panel.`;
+}
+
+/**
+ * Spoken introduction for the Process Q&A mode. Spoken once per session
+ * the first time the user enters Process Q&A mode (similar to how
+ * describeQuestionnaireIntro fires once per preset).
+ */
+export function describeProcessQaIntro(): string {
+  return `Let me tell you about OC's investment process. Pick a topic from the panel — investment philosophy, research, stock selection, risk management, ESG, and more — or just ask me about any aspect.`;
 }

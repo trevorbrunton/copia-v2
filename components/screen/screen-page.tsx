@@ -12,7 +12,6 @@ import { StockFactPanel } from "./stock-fact-panel";
 import { ConversationPane, type TranscriptEntry } from "./conversation-pane";
 import { AvatarVideo } from "./avatar-video";
 import {
-  METHODOLOGY_FILTERS,
   QUESTIONNAIRE_FILTERS,
   STAGE_LABELS,
   type FilterId,
@@ -29,14 +28,14 @@ import {
   describeFundFactMissingFund,
   describeFunnelComplete,
   describeFunnelCompletePrompt,
-  describeMethodologyIntro,
-  describeMethodologyTransition,
   describeMonitoringEnabled,
   describeOutputEmail,
   describeOutputShow,
   describePortfolioOverlap,
+  describeProcessFact,
+  describeProcessFactMissingTopic,
+  describeProcessQaIntro,
   describeQuestionnaireIntro,
-  describeQuestionnaireTransition,
   describeRestart,
   describeStockFactRequest,
   describeStockFactUnresolved,
@@ -51,11 +50,16 @@ import {
   type CategoryId,
   type FundId,
 } from "@/src/screen/fund-qa";
+import {
+  PROCESS_TOPIC_IDS,
+  getProcessAnswer,
+  getProcessTopicLabel,
+  type ProcessTopicId,
+} from "@/src/screen/process-qa";
 import { useTavusAvatar } from "@/src/demo/use-tavus-avatar";
 import { useVoiceListener } from "@/src/demo/use-voice-listener";
 
-type Preset = "questionnaire" | "methodology";
-type Mode = "screening" | "fund_qa";
+type Mode = "screening" | "fund_qa" | "process_qa";
 
 const FUNDS = listFunds();
 
@@ -79,16 +83,14 @@ export function ScreenPage() {
   const screener = useScreener();
   const tavusAvatar = useTavusAvatar();
 
-  const [preset, setPreset] = useState<Preset>("questionnaire");
-  // Tracks which preset's introduction has already finished SPEAKING
+  // Tracks whether the screening intro has already finished SPEAKING
   // this session — drives the rail's Introduction step (checked vs
   // pending). Set AFTER the narrate() promise resolves so the visual
   // doesn't flip before Pep finishes the line.
-  // The auto-fire effect uses `introQueuedForPresetRef` (synchronous)
-  // to avoid double-firing while the audio is in flight.
-  const [introSpokenForPreset, setIntroSpokenForPreset] =
-    useState<Preset | null>(null);
-  const introQueuedForPresetRef = useRef<Preset | null>(null);
+  // The auto-fire effect uses `introQueuedRef` (synchronous) to avoid
+  // double-firing while the audio is in flight.
+  const [introSpoken, setIntroSpoken] = useState(false);
+  const introQueuedRef = useRef(false);
   // Same split for universe — `universeSpoken` drives the rail; the
   // ref guards against the auto-fire effect re-queuing during the
   // window between queue + audio-finish.
@@ -96,12 +98,16 @@ export function ScreenPage() {
   const universeQueuedRef = useRef(false);
   const [mode, setMode] = useState<Mode>("screening");
   const [activeFund, setActiveFund] = useState<FundId>("mid_cap");
+  // Tracks whether the Process Q&A intro has been spoken this session,
+  // so the user gets a one-time orientation line on first entry.
+  const [processIntroSpoken, setProcessIntroSpoken] = useState(false);
+  const processIntroQueuedRef = useRef(false);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
 
-  const sequence = preset === "questionnaire" ? QUESTIONNAIRE_FILTERS : METHODOLOGY_FILTERS;
+  const sequence = QUESTIONNAIRE_FILTERS;
 
   const completedStageIds: StageId[] = screener.stages.map((s) => s.id);
   const nextIdx = sequence.findIndex((f) => !completedStageIds.includes(f));
@@ -142,10 +148,10 @@ export function ScreenPage() {
       tavusAvatar.status === "ready" || tavusAvatar.status === "speaking";
   }, [tavusAvatar.status]);
 
-  // The session greeting now lives at the start of the per-preset
-  // intro narration (describeQuestionnaireIntro / describeMethodologyIntro
-  // both open with "Hi, I'm Pep…"). One greeting + one philosophy line
-  // = one echo, no risk of the second cutting off the first.
+  // The session greeting lives at the start of the screening intro
+  // (describeQuestionnaireIntro opens with "Hi, I'm Pep…"). One
+  // greeting + one philosophy line = one echo, no risk of the second
+  // cutting off the first.
   const tavusStatus = tavusAvatar.status;
 
   /**
@@ -193,53 +199,44 @@ export function ScreenPage() {
   );
 
   /**
-   * Speak the introduction for the given preset, once per session per
-   * preset. The intro is a brief framing of OC's investment philosophy
-   * and what the chosen track will demonstrate (source: the FSC
-   * questionnaire — see narration.ts). Renders as the first item in
-   * the funnel rail.
+   * Speak the screening introduction once per session. Brief framing
+   * of OC's investment philosophy and what the walk-through will
+   * demonstrate (source: the FSC questionnaire — see narration.ts).
+   * Renders as the first item in the funnel rail.
    */
-  const narrateIntroFor = useCallback(
-    async (p: Preset): Promise<void> => {
-      // Synchronous queue guard — keeps a re-rendered effect from
-      // dispatching a second echo while the first is still in flight.
-      if (introQueuedForPresetRef.current === p) return;
-      if (introSpokenForPreset === p) return;
-      introQueuedForPresetRef.current = p;
-      await narrate(
-        p === "methodology"
-          ? describeMethodologyIntro()
-          : describeQuestionnaireIntro()
-      );
-      // Audio (plus inter-narration pause) has fully completed —
-      // flip the rail's Introduction step to checked.
-      setIntroSpokenForPreset(p);
+  const narrateScreeningIntro = useCallback(
+    async (): Promise<void> => {
+      if (introQueuedRef.current) return;
+      if (introSpoken) return;
+      introQueuedRef.current = true;
+      await narrate(describeQuestionnaireIntro());
+      setIntroSpoken(true);
     },
-    [introSpokenForPreset, narrate]
+    [introSpoken, narrate]
   );
 
-  // Auto-fire the intro once the avatar is ready AND the snapshot has
-  // loaded AND the user is in screening mode. The synchronous
-  // `introQueuedForPresetRef` guard prevents a re-rendered effect
+  // Auto-fire the screening intro once the avatar is ready AND the
+  // snapshot has loaded AND the user is in screening mode. The
+  // synchronous `introQueuedRef` guard prevents a re-rendered effect
   // from dispatching a duplicate echo while the first is still in
-  // flight; the state guard catches the case where audio has
-  // finished and visual is updated.
+  // flight; the state guard catches the case where audio has finished
+  // and visual is updated.
   useEffect(() => {
     if (!isStarted) return;
     if (tavusStatus !== "ready") return;
     if (mode !== "screening") return;
-    if (introQueuedForPresetRef.current === preset) return;
-    if (introSpokenForPreset === preset) return;
+    if (introQueuedRef.current) return;
+    if (introSpoken) return;
     queueMicrotask(() => {
-      void narrateIntroFor(preset);
+      void narrateScreeningIntro();
     });
-  }, [isStarted, tavusStatus, mode, preset, introSpokenForPreset, narrateIntroFor]);
+  }, [isStarted, tavusStatus, mode, introSpoken, narrateScreeningIntro]);
 
-  // Universe narration fires once after the intro audio for the
-  // active preset has fully completed. Synchronous queued ref
-  // prevents duplicate dispatch; `universeSpoken` state flips after
-  // the narrate() promise resolves so the rail's Universe step
-  // doesn't visually flip to "checked" until Pep finishes saying it.
+  // Universe narration fires once after the screening intro audio has
+  // fully completed. Synchronous queued ref prevents duplicate
+  // dispatch; `universeSpoken` state flips after the narrate() promise
+  // resolves so the rail's Universe step doesn't visually flip to
+  // "checked" until Pep finishes saying it.
   const universeStage = screener.stages[0];
   useEffect(() => {
     if (universeQueuedRef.current) return;
@@ -247,7 +244,7 @@ export function ScreenPage() {
     if (!isStarted) return;
     if (tavusStatus !== "ready") return;
     if (mode !== "screening") return;
-    if (introSpokenForPreset !== preset) return;
+    if (!introSpoken) return;
     if (!universeStage) return;
     universeQueuedRef.current = true;
     const count = universeStage.count;
@@ -259,12 +256,26 @@ export function ScreenPage() {
     isStarted,
     tavusStatus,
     mode,
-    preset,
-    introSpokenForPreset,
+    introSpoken,
     universeStage,
     universeSpoken,
     narrate,
   ]);
+
+  // Auto-fire the Process Q&A intro the first time the user enters
+  // process_qa mode. One-shot per session — same pattern as the
+  // screening intro but gated on a separate flag.
+  useEffect(() => {
+    if (mode !== "process_qa") return;
+    if (tavusStatus !== "ready") return;
+    if (processIntroQueuedRef.current) return;
+    if (processIntroSpoken) return;
+    processIntroQueuedRef.current = true;
+    queueMicrotask(async () => {
+      await narrate(describeProcessQaIntro());
+      setProcessIntroSpoken(true);
+    });
+  }, [mode, tavusStatus, processIntroSpoken, narrate]);
 
   /**
    * Apply a filter and narrate the outcome.
@@ -300,52 +311,6 @@ export function ScreenPage() {
     [screener, narrate, sequence]
   );
 
-  /**
-   * Preset toggle handler with two paths:
-   *
-   * - **First-time selection** (no funnel progress yet) → narrate the
-   *   full preset intro so the audience hears the philosophy framing.
-   *   User then clicks Next → for each filter.
-   * - **Mid-session switch** (funnel has run filters) → reset the
-   *   funnel, narrate a brief transition cue, and let the user click
-   *   Next → through the new preset's filters. Both presets are
-   *   step-by-step — the audience sees each filter's effect.
-   *
-   * Mark intro AND universe as "spoken" for the new preset on
-   * mid-session switch so the auto-fire effects stay silent and the
-   * rail correctly shows them as already-completed (the brief
-   * transition narration substitutes for them).
-   */
-  const switchPreset = useCallback(
-    (newPreset: Preset) => {
-      if (newPreset === preset) return;
-      const hasProgress = screener.stages.length > 1;
-      setPreset(newPreset);
-
-      if (!hasProgress) {
-        void narrateIntroFor(newPreset);
-        return;
-      }
-
-      // Mid-session switch: reset, mark intro/universe done sync so
-      // the auto-fire effects stay silent, then narrate the brief
-      // transition. User clicks Next → through the new preset's
-      // filters from there.
-      screener.reset();
-      introQueuedForPresetRef.current = newPreset;
-      setIntroSpokenForPreset(newPreset);
-      universeQueuedRef.current = true;
-      setUniverseSpoken(true);
-
-      narrate(
-        newPreset === "methodology"
-          ? describeMethodologyTransition()
-          : describeQuestionnaireTransition()
-      );
-    },
-    [preset, screener, narrate, narrateIntroFor]
-  );
-
   const handleIntent = useCallback(
     async (intent: Intent) => {
       switch (intent.kind) {
@@ -358,13 +323,6 @@ export function ScreenPage() {
           break;
         case "apply_filter":
           await applyAndNarrate(intent.filterId);
-          break;
-        case "apply_initial_screen":
-          // Switch to methodology and let the user step through it.
-          // First-time path narrates the full intro; mid-session path
-          // narrates the brief transition. Either way, no auto-run —
-          // the user clicks Next → for each filter.
-          switchPreset("methodology");
           break;
         case "output_show": {
           const current = screener.stages.at(-1);
@@ -455,10 +413,23 @@ export function ScreenPage() {
           narrate(describeFundFact(getFundDisplayName(fundId), answer));
           break;
         }
+        case "info_process_field": {
+          // Topic-keyword utterances always carry a topic via the rule
+          // layer; classifier-fallback may return null. Dispatcher just
+          // prompts the user to pick one — no per-mode fallback because
+          // there's only one process bank.
+          if (!intent.topic) {
+            narrate(describeProcessFactMissingTopic());
+            break;
+          }
+          const answer = getProcessAnswer(intent.topic);
+          narrate(describeProcessFact(getProcessTopicLabel(intent.topic), answer));
+          break;
+        }
         case "restart":
           screener.reset();
-          setIntroSpokenForPreset(null);
-          introQueuedForPresetRef.current = null;
+          setIntroSpoken(false);
+          introQueuedRef.current = false;
           setUniverseSpoken(false);
           universeQueuedRef.current = false;
           narrate(describeRestart());
@@ -469,15 +440,7 @@ export function ScreenPage() {
           break;
       }
     },
-    [
-      screener,
-      nextFilter,
-      narrate,
-      applyAndNarrate,
-      switchPreset,
-      mode,
-      activeFund,
-    ]
+    [screener, nextFilter, narrate, applyAndNarrate, mode, activeFund]
   );
 
   /**
@@ -499,6 +462,26 @@ export function ScreenPage() {
         const label = getCategoryLabel(category).toLowerCase();
         appendTranscript("user", `Tell me about the ${fundName}'s ${label}.`);
         await handleIntent({ kind: "info_fund_field", fundId, category });
+      } finally {
+        setIsThinking(false);
+      }
+    },
+    [isThinking, appendTranscript, handleIntent]
+  );
+
+  /**
+   * Click-driven path for the process-info panel — bypasses /process
+   * since the topic is known from the click. Mirrors askAboutCategory
+   * including the `isThinking` overlap guard.
+   */
+  const askAboutTopic = useCallback(
+    async (topic: ProcessTopicId) => {
+      if (isThinking) return;
+      setIsThinking(true);
+      try {
+        const label = getProcessTopicLabel(topic).toLowerCase();
+        appendTranscript("user", `Tell me about OC's ${label}.`);
+        await handleIntent({ kind: "info_process_field", topic });
       } finally {
         setIsThinking(false);
       }
@@ -681,7 +664,7 @@ export function ScreenPage() {
               <div className="flex items-center justify-between text-xs text-white/60">
                 <span className="font-medium">Mode</span>
                 <div className="flex gap-1 rounded-md bg-white/5 p-0.5">
-                  {(["screening", "fund_qa"] as Mode[]).map((m) => (
+                  {(["screening", "fund_qa", "process_qa"] as Mode[]).map((m) => (
                     <button
                       key={m}
                       type="button"
@@ -692,43 +675,20 @@ export function ScreenPage() {
                           : "text-white/70 hover:text-white"
                       }`}
                     >
-                      {m === "screening" ? "Screening" : "Fund Q&A"}
+                      {m === "screening" ? "Screening" : m === "fund_qa" ? "Fund Q&A" : "Process Q&A"}
                     </button>
                   ))}
                 </div>
               </div>
 
               {mode === "screening" ? (
-                <>
-                  <div className="flex items-center justify-between text-xs text-white/60">
-                    <span className="font-medium">Preset</span>
-                    <div className="flex gap-1 rounded-md bg-white/5 p-0.5">
-                      {(["questionnaire", "methodology"] as Preset[]).map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => switchPreset(p)}
-                          disabled={isBusy}
-                          className={`rounded px-2 py-1 text-xs ${
-                            preset === p
-                              ? "bg-white text-[var(--oc-navy)]"
-                              : "text-white/70 hover:text-white"
-                          } disabled:opacity-50 disabled:hover:text-white/70`}
-                        >
-                          {p === "questionnaire" ? "Pep's 8 Qs" : "OC methodology"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <FunnelRail
-                    stages={screener.stages}
-                    pending={pending}
-                    intro={{ label: "Introduction", spoken: introSpokenForPreset === preset }}
-                    universeSpoken={universeSpoken}
-                  />
-                </>
-              ) : (
+                <FunnelRail
+                  stages={screener.stages}
+                  pending={pending}
+                  intro={{ label: "Introduction", spoken: introSpoken }}
+                  universeSpoken={universeSpoken}
+                />
+              ) : mode === "fund_qa" ? (
                 <div className="flex flex-col gap-2 text-xs text-white/60">
                   <span className="font-medium">Fund</span>
                   <div className="flex flex-col gap-1 rounded-md bg-white/5 p-0.5">
@@ -748,6 +708,13 @@ export function ScreenPage() {
                     ))}
                   </div>
                 </div>
+              ) : (
+                <div className="flex flex-col gap-2 text-xs text-white/60">
+                  <span className="font-medium">OC Process Q&amp;A</span>
+                  <p className="text-white/50">
+                    Click a topic in the panel to ask Pep, or use voice.
+                  </p>
+                </div>
               )}
 
               {mode === "screening" ? null : <div className="flex-1" />}
@@ -765,8 +732,8 @@ export function ScreenPage() {
                     <Button
                       onClick={() => {
                         screener.reset();
-                        setIntroSpokenForPreset(null);
-                        introQueuedForPresetRef.current = null;
+                        setIntroSpoken(false);
+                        introQueuedRef.current = false;
                         setUniverseSpoken(false);
                         universeQueuedRef.current = false;
                         narrate(describeRestart());
@@ -780,7 +747,9 @@ export function ScreenPage() {
                   </>
                 ) : (
                   <div className="flex-1 text-xs text-white/50">
-                    Pick a fund, then ask Pep — or click a category in the panel.
+                    {mode === "fund_qa"
+                      ? "Pick a fund, then ask Pep — or click a category in the panel."
+                      : "Click a topic to ask Pep, or use voice."}
                   </div>
                 )}
                 <Button
@@ -833,7 +802,7 @@ export function ScreenPage() {
                     </span>
                   ) : null}
                 </div>
-              ) : (
+              ) : mode === "fund_qa" ? (
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
                   <span>
                     Active fund:{" "}
@@ -841,6 +810,16 @@ export function ScreenPage() {
                   </span>
                   <span className="text-white/40">
                     Click a category to ask Pep, or use voice.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/60">
+                  <span>
+                    OC investment process —{" "}
+                    <span className="text-white">FSC questionnaire content</span>
+                  </span>
+                  <span className="text-white/40">
+                    Click a topic to ask Pep, or use voice.
                   </span>
                 </div>
               )}
@@ -852,7 +831,7 @@ export function ScreenPage() {
                     selectedTicker={selectedTicker}
                     className="flex-1 min-h-0 flex flex-col"
                   />
-                ) : (
+                ) : mode === "fund_qa" ? (
                   <div className="flex-1 min-h-0 overflow-auto p-4">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {CATEGORY_IDS.map((cat) => (
@@ -864,6 +843,22 @@ export function ScreenPage() {
                           className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50"
                         >
                           {getCategoryLabel(cat)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 min-h-0 overflow-auto p-4">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {PROCESS_TOPIC_IDS.map((topic) => (
+                        <button
+                          key={topic}
+                          type="button"
+                          onClick={() => void askAboutTopic(topic)}
+                          disabled={isThinking}
+                          className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50"
+                        >
+                          {getProcessTopicLabel(topic)}
                         </button>
                       ))}
                     </div>

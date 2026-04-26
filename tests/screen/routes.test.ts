@@ -146,10 +146,11 @@ describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/process", () => {
     expect(body.intent.ticker).toBe("CBA");
   });
 
-  it("classifies the OC initial-screen shortcut", async () => {
-    const res = await processPOST(jsonRequest({ text: "Run the OC initial screen" }));
-    const body = (await res.json()) as { intent: { kind: string } };
-    expect(body.intent.kind).toBe("apply_initial_screen");
+  it("classifies a process-topic question into info_process_field", async () => {
+    const res = await processPOST(jsonRequest({ text: "What is OC's investment philosophy?" }));
+    const body = (await res.json()) as { intent: { kind: string; topic?: string } };
+    expect(body.intent.kind).toBe("info_process_field");
+    expect(body.intent.topic).toBe("philosophy");
   });
 
   it("rejects empty/missing text with 400", async () => {

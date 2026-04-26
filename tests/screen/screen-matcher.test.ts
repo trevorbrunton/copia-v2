@@ -78,15 +78,15 @@ describe("matchScreenIntent — composition", () => {
 
   it("respects classifier outputs that pass schema even when the rule layer would have run", async () => {
     // This utterance does NOT match any rule, so the classifier path
-    // runs. The stub returns apply_initial_screen — verify the
-    // composition propagates it untouched.
-    const initialScreenClassifier: ClassifierFn = async () => ({
-      kind: "apply_initial_screen",
+    // runs. The stub returns next_step — verify the composition
+    // propagates it untouched.
+    const nextStepClassifier: ClassifierFn = async () => ({
+      kind: "next_step",
     });
     const intent = await matchScreenIntent(
-      "give me OCs full process please",
-      initialScreenClassifier
+      "give me the next thing please",
+      nextStepClassifier
     );
-    expect(intent.kind).toBe("apply_initial_screen");
+    expect(intent.kind).toBe("next_step");
   });
 });

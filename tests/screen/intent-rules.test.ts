@@ -19,11 +19,6 @@ const cases: Array<{ utterance: string; expectKind: string; expectFilter?: strin
   { utterance: "Reset.", expectKind: "restart" },
   { utterance: "Restart please", expectKind: "restart" },
 
-  // ─── OC initial screen shortcut ────────────────────────
-  { utterance: "Run the OC initial screen", expectKind: "apply_initial_screen" },
-  { utterance: "run the initial screen", expectKind: "apply_initial_screen" },
-  { utterance: "Run the screen", expectKind: "apply_initial_screen" },
-
   // ─── Output preferences ────────────────────────────────
   { utterance: "Show me the list", expectKind: "output_show" },
   { utterance: "Just show me", expectKind: "output_show" },
@@ -83,6 +78,32 @@ interface FundCase {
   fundId: string;
   category: string;
 }
+
+interface ProcessCase {
+  utterance: string;
+  topic: string;
+}
+
+const processCases: ProcessCase[] = [
+  // ─── Process topic detection (no fund-name gate) ──────
+  { utterance: "What is OC's investment philosophy", topic: "philosophy" },
+  { utterance: "Tell me about OC's investment style", topic: "style" },
+  { utterance: "What's the investable universe", topic: "universe" },
+  { utterance: "Describe their research process", topic: "research" },
+  { utterance: "How do they pick stocks", topic: "stock_selection" },
+  { utterance: "Tell me about the Operational Risk Assessment", topic: "stock_selection" },
+  { utterance: "How does OC construct portfolios", topic: "portfolio_construction" },
+  { utterance: "What's the portfolio construction approach", topic: "portfolio_construction" },
+  { utterance: "How do they manage risk", topic: "risk_management" },
+  { utterance: "Tell me about the Risk Management Committee", topic: "risk_management" },
+  { utterance: "What's the ESG policy", topic: "esg" },
+  { utterance: "Describe their corporate governance approach", topic: "corporate_governance" },
+  { utterance: "How do they vote proxies", topic: "corporate_governance" },
+  { utterance: "How do they manage transaction costs", topic: "transaction_costs" },
+  { utterance: "What's OC's tax management approach", topic: "tax" },
+  { utterance: "Who runs the funds", topic: "team" },
+  { utterance: "Tell me about Robert Frost", topic: "team" },
+];
 
 const fundCases: FundCase[] = [
   // ─── Fund-only (defaults to fund_overview) ─────────────
@@ -147,7 +168,7 @@ describe("matchIntentRule", () => {
 
   it("is case-insensitive", () => {
     expect(matchIntentRule("NEXT")?.kind).toBe("next_step");
-    expect(matchIntentRule("RUN THE INITIAL SCREEN")?.kind).toBe("apply_initial_screen");
+    expect(matchIntentRule("RESET")?.kind).toBe("restart");
   });
 
   describe("info_fund_field — multi-fund Q&A", () => {
@@ -176,6 +197,40 @@ describe("matchIntentRule", () => {
       // funnel rules run first.
       const intent = matchIntentRule("market cap above 50m");
       expect(intent?.kind).toBe("apply_filter");
+    });
+  });
+
+  describe("info_process_field — OC investment process Q&A", () => {
+    for (const c of processCases) {
+      it(`classifies "${c.utterance}" → ${c.topic}`, () => {
+        const intent = matchIntentRule(c.utterance);
+        expect(intent).not.toBeNull();
+        expect(intent!.kind).toBe("info_process_field");
+        expect((intent as { topic?: string }).topic).toBe(c.topic);
+      });
+    }
+
+    it("fund-info wins over process-info when a fund is named", () => {
+      // "what's the OC mid-cap fund's tax treatment" must route to
+      // info_fund_field/tax, not info_process_field/tax — fund-info
+      // runs before process-info in matchIntentRule.
+      const intent = matchIntentRule("what's the OC mid-cap fund's tax treatment");
+      expect(intent?.kind).toBe("info_fund_field");
+      expect((intent as { category?: string }).category).toBe("tax");
+    });
+
+    it("specific filter rules still win over process-info when both could match", () => {
+      // "market cap above 50m" should hit Q1, not get derailed by
+      // process-info — funnel rules run first.
+      const intent = matchIntentRule("market cap above 50m");
+      expect(intent?.kind).toBe("apply_filter");
+    });
+
+    it("does NOT fire process-info on generic stock-fact terms", () => {
+      // "what's the share price of CBA" must stay info_stock_field,
+      // not get caught by a process-topic keyword.
+      const intent = matchIntentRule("what's the share price of CBA");
+      expect(intent?.kind).toBe("info_stock_field");
     });
   });
 });

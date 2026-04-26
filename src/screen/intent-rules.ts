@@ -12,6 +12,7 @@
 import { STAGE_IDS } from "@/src/screen/funnel";
 import type { Intent } from "@/src/screen/intent";
 import type { CategoryId, FundId } from "@/src/screen/fund-qa";
+import type { ProcessTopicId } from "@/src/screen/process-qa";
 
 type Rule = {
   pattern: RegExp;
@@ -132,6 +133,83 @@ function matchFundInfoRule(text: string): Intent | null {
   return { kind: "info_fund_field", fundId, category };
 }
 
+// ─── Process Q&A topic detection ────────────────────────────────────
+//
+// Used by `matchProcessInfoRule` further down. Unlike fund-info there's
+// no name gate — a topic keyword alone fires the rule. The rule sits
+// AFTER matchFundInfoRule so a fund-qualified utterance still wins
+// (e.g. "what's the mid-cap fund's risk level" → info_fund_field, not
+// info_process_field/risk_management). Order matters within the table:
+// more specific patterns first.
+
+const PROCESS_TOPIC_PATTERNS: Array<[RegExp, ProcessTopicId]> = [
+  [
+    /\b(?:investment\s+philosophy|investment\s+approach|investment\s+beliefs?|philosophy|beliefs?\s+about\s+invest)\b/i,
+    "philosophy",
+  ],
+  [
+    /\b(?:investment\s+style|style|active\s+vs\s+passive|growth\s+vs\s+value|tracking\s+error|benchmark[\s-]?unaware)\b/i,
+    "style",
+  ],
+  [
+    /\b(?:investable\s+universe|investment\s+universe|stock\s+universe|what\s+(?:does|do)\s+(?:they|oc)\s+invest\s+in)\b/i,
+    "universe",
+  ],
+  [
+    /\b(?:research\s+(?:process|effort|approach|method)|company\s+visits?|fundamental\s+research|how\s+(?:does|do).*\bresearch\b)\b/i,
+    "research",
+  ],
+  [
+    /\b(?:stock\s+selection|initial\s+screen|operational\s+risk\s+assessment|\bORA\b|valuation\s+(?:score|assessment|process)|how\s+(?:does|do).*\b(?:pick|select|choose)\s+stocks?)\b/i,
+    "stock_selection",
+  ],
+  [
+    /\b(?:portfolio\s+construction|weighting\s+matrix|stock\s+weight|position\s+sizing|cash\s+allocation|liquidity\s+scaling|construct(?:ing|s)?\s+portfolios?|build(?:ing|s)?\s+portfolios?)\b/i,
+    "portfolio_construction",
+  ],
+  [
+    /\b(?:risk\s+management|risk\s+committee|\bRMC\b|risk\s+controls?|sector\s+limits?|how\s+(?:does|do).*\bmanage\s+risk\b)\b/i,
+    "risk_management",
+  ],
+  [
+    /\b(?:ESG|environmental\s+social|UNPRI|responsible\s+invest|ethical\s+invest|sustainabilit)\b/i,
+    "esg",
+  ],
+  [
+    /\b(?:corporate\s+governance|voting\s+(?:policy|process|rights?)|proxy\s+voting|\bproxies\b|shareholder\s+rights?)\b/i,
+    "corporate_governance",
+  ],
+  [
+    /\b(?:transaction\s+costs?|brokerage|trading\s+costs?|broker\s+(?:rates?|panel)|execution\s+costs?)\b/i,
+    "transaction_costs",
+  ],
+  [
+    /\b(?:tax\s+management|after.?tax|franking|capital\s+gains\s+tax|\bCGT\b|tax\s+approach|tax\s+treatment)\b/i,
+    "tax",
+  ],
+  [
+    /\b(?:investment\s+team|portfolio\s+manager|fund\s+manager|head\s+of\s+(?:invest|equit)|robert\s+frost|bruce\s+loveday|stephen\s+evans|who\s+(?:runs|leads|manages)\s+(?:the\s+)?(?:funds?|portfolios?|invest)|the\s+team)\b/i,
+    "team",
+  ],
+];
+
+function extractProcessTopic(text: string): ProcessTopicId | null {
+  for (const [re, id] of PROCESS_TOPIC_PATTERNS) if (re.test(text)) return id;
+  return null;
+}
+
+/**
+ * Fire `info_process_field` when a process-topic keyword is detected.
+ * Sits AFTER matchFundInfoRule so fund-qualified utterances still win.
+ * Keywords are specific enough to avoid hijacking generic stock-fact
+ * patterns (e.g. "market cap" stays a stock-fact intent).
+ */
+function matchProcessInfoRule(text: string): Intent | null {
+  const topic = extractProcessTopic(text);
+  if (!topic) return null;
+  return { kind: "info_process_field", topic };
+}
+
 /**
  * Patterns are matched against the lowercased + trimmed utterance.
  * Most patterns omit `^` / `$` so they're substring-matched. Use the
@@ -147,12 +225,6 @@ const RULES: Rule[] = [
   {
     pattern: /^(?:start\s+over|reset|restart)\b/,
     build: () => ({ kind: "restart" }),
-  },
-
-  // ─── OC initial screen shortcut ─────────────────────────────────
-  {
-    pattern: /\b(?:run|apply|do)\s+(?:the\s+)?(?:oc\s+)?(?:initial\s+)?screen\b/,
-    build: () => ({ kind: "apply_initial_screen" }),
   },
 
   // ─── Funnel filters (specific — must precede generic stock-fact) ─
@@ -313,11 +385,13 @@ function runRules(text: string, rules: readonly Rule[]): Intent | null {
  * Try to match an utterance against the rule layer. Returns null if no
  * rule matches; the caller should fall back to the constrained classifier.
  *
- * Order: navigation/screen-shortcut/funnel/Q7/Q8 rules first, then
- * fund-info (only fires when a fund name is present), then the generic
- * stock-fact + output catch-alls. The fund-info call sits between the
- * two halves so e.g. "OC mid-cap fund's market cap" routes to fund-info
- * but "market cap above 50m" still hits the Q1 funnel rule.
+ * Order: navigation/funnel/Q7/Q8 rules first, then fund-info (only
+ * fires when a fund name is present), then process-info (fires on
+ * process-topic keywords without a name gate), then the generic
+ * stock-fact + output catch-alls. The two info matchers sit between
+ * the two halves so e.g. "OC mid-cap fund's market cap" routes to
+ * fund-info, "OC's research process" routes to process-info, and
+ * "market cap above 50m" still hits the Q1 funnel rule.
  */
 export function matchIntentRule(utterance: string): Intent | null {
   const text = utterance.toLowerCase().trim();
@@ -325,6 +399,7 @@ export function matchIntentRule(utterance: string): Intent | null {
   return (
     runRules(text, RULES) ??
     matchFundInfoRule(text) ??
+    matchProcessInfoRule(text) ??
     runRules(text, POST_FUND_INFO_RULES)
   );
 }

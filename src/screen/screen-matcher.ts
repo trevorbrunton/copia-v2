@@ -18,6 +18,11 @@ import {
   type CategoryId,
   type FundId,
 } from "@/src/screen/fund-qa";
+import {
+  PROCESS_TOPIC_IDS,
+  isProcessTopicId,
+  type ProcessTopicId,
+} from "@/src/screen/process-qa";
 import { logger } from "@/src/lib/logger";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
@@ -71,14 +76,18 @@ ${FUND_IDS.map((id) => `  - ${id}`).join("\n")}
 Allowed fund categories (for info_fund_field only):
 ${CATEGORY_IDS.map((id) => `  - ${id}`).join("\n")}
 
+Allowed process topics (for info_process_field only):
+${PROCESS_TOPIC_IDS.map((id) => `  - ${id}`).join("\n")}
+
 Output format: a single JSON object with these fields:
-  { "kind": <one of the allowed intents>, "filterId"?: <filter id>, "field"?: <stock-fact field>, "fundId"?: <fund id>, "category"?: <fund category> }
+  { "kind": <one of the allowed intents>, "filterId"?: <filter id>, "field"?: <stock-fact field>, "fundId"?: <fund id>, "category"?: <fund category>, "topic"?: <process topic> }
 
 Rules:
 - Output JSON only. No prose, no code fences, no commentary.
 - "filterId" is required only when kind is "apply_filter".
 - "field" is allowed only when kind is "info_stock_field" and is optional.
 - "fundId" and "category" are allowed only when kind is "info_fund_field"; both are optional but at least one should be present.
+- "topic" is allowed only when kind is "info_process_field" and is optional.
 - If the user's intent cannot be matched, output { "kind": "fallback" }.`;
 
 const ResponseSchema = z.object({
@@ -87,6 +96,7 @@ const ResponseSchema = z.object({
   field: z.enum(["share_price", "market_cap", "earnings_status"]).optional(),
   fundId: z.string().optional(),
   category: z.string().optional(),
+  topic: z.string().optional(),
 });
 
 const VALID_FILTER_IDS = new Set<string>(Object.values(STAGE_IDS).filter((id) => id !== "universe"));
@@ -144,7 +154,7 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
   const result = ResponseSchema.safeParse(parsed);
   if (!result.success) return { kind: "fallback" };
 
-  const { kind, filterId, field, fundId, category } = result.data;
+  const { kind, filterId, field, fundId, category, topic } = result.data;
 
   switch (kind) {
     case "apply_filter": {
@@ -164,10 +174,13 @@ export const anthropicClassifier: ClassifierFn = async (text) => {
       if (!validFund && !validCategory) return { kind: "fallback" };
       return { kind: "info_fund_field", fundId: validFund, category: validCategory };
     }
+    case "info_process_field": {
+      const validTopic: ProcessTopicId | undefined =
+        topic && isProcessTopicId(topic) ? topic : undefined;
+      return { kind: "info_process_field", topic: validTopic };
+    }
     case "next_step":
       return { kind: "next_step" };
-    case "apply_initial_screen":
-      return { kind: "apply_initial_screen" };
     case "output_show":
       return { kind: "output_show" };
     case "output_email":

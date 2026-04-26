@@ -42,7 +42,6 @@ import {
   describeStockFactGatedByFunnel,
   describeStockFactRequest,
   describeStockFactUnresolved,
-  describeUniverseStage,
 } from "@/src/screen/narration";
 import {
   CATEGORY_IDS,
@@ -94,11 +93,6 @@ export function ScreenPage() {
   // double-firing while the audio is in flight.
   const [introSpoken, setIntroSpoken] = useState(false);
   const introQueuedRef = useRef(false);
-  // Same split for universe — `universeSpoken` drives the rail; the
-  // ref guards against the auto-fire effect re-queuing during the
-  // window between queue + audio-finish.
-  const [universeSpoken, setUniverseSpoken] = useState(false);
-  const universeQueuedRef = useRef(false);
   const [mode, setMode] = useState<Mode>("screening");
   const [activeFund, setActiveFund] = useState<FundId>("mid_cap");
   // Tracks whether the Process Q&A intro has been spoken this session,
@@ -211,20 +205,24 @@ export function ScreenPage() {
   );
 
   /**
-   * Speak the screening introduction once per session. Brief framing
-   * of OC's investment philosophy and what the walk-through will
-   * demonstrate (source: the FSC questionnaire — see narration.ts).
-   * Renders as the first item in the funnel rail.
+   * Speak the screening introduction once per session. The intro now
+   * weaves in the universe count ("we're starting from the full ASX
+   * universe — about N listed companies…") so there's no separate
+   * universe narration that could cut the intro mid-sentence. Renders
+   * as the first two items in the funnel rail (Introduction +
+   * Universe), both flipping to "checked" together once introSpoken.
    */
+  const universeStage = screener.stages[0];
   const narrateScreeningIntro = useCallback(
     async (): Promise<void> => {
       if (introQueuedRef.current) return;
       if (introSpoken) return;
+      if (!universeStage) return;
       introQueuedRef.current = true;
-      await narrate(describeQuestionnaireIntro());
+      await narrate(describeQuestionnaireIntro(universeStage.count));
       setIntroSpoken(true);
     },
-    [introSpoken, narrate]
+    [introSpoken, universeStage, narrate]
   );
 
   // Auto-fire the screening intro once the avatar is ready AND the
@@ -243,36 +241,6 @@ export function ScreenPage() {
       void narrateScreeningIntro();
     });
   }, [isStarted, tavusStatus, mode, introSpoken, narrateScreeningIntro]);
-
-  // Universe narration fires once after the screening intro audio has
-  // fully completed. Synchronous queued ref prevents duplicate
-  // dispatch; `universeSpoken` state flips after the narrate() promise
-  // resolves so the rail's Universe step doesn't visually flip to
-  // "checked" until Pep finishes saying it.
-  const universeStage = screener.stages[0];
-  useEffect(() => {
-    if (universeQueuedRef.current) return;
-    if (universeSpoken) return;
-    if (!isStarted) return;
-    if (tavusStatus !== "ready") return;
-    if (mode !== "screening") return;
-    if (!introSpoken) return;
-    if (!universeStage) return;
-    universeQueuedRef.current = true;
-    const count = universeStage.count;
-    queueMicrotask(async () => {
-      await narrate(describeUniverseStage(count));
-      setUniverseSpoken(true);
-    });
-  }, [
-    isStarted,
-    tavusStatus,
-    mode,
-    introSpoken,
-    universeStage,
-    universeSpoken,
-    narrate,
-  ]);
 
   // Auto-fire the Process Q&A intro the first time the user enters
   // process_qa mode. One-shot per session — same pattern as the
@@ -304,11 +272,15 @@ export function ScreenPage() {
       const stage = await screener.applyFilter(filterId);
       if (stage) {
         const outcome = describeAppliedFilter(filterId, stage.count, prevCount);
-        // Final filter in the active preset's sequence: append the
-        // follow-up prompt onto the same echo. A single utterance avoids
-        // Tavus cutting the prompt off mid-sentence — see
-        // describeFunnelCompletePrompt for the rationale.
-        const isFinal = filterId === sequence[sequence.length - 1];
+        // Funnel-complete check — fire the follow-up prompt when this
+        // application empties the pending list, regardless of canonical
+        // sequence position. With out-of-order filtering the "last"
+        // filter isn't necessarily Q6; it's whichever was applied last.
+        // `pending` is closed over the pre-call value, so length === 1
+        // and the only entry being filterId means we just applied the
+        // last one. Single concatenated echo avoids Tavus cutting the
+        // prompt off mid-sentence — see describeFunnelCompletePrompt.
+        const isFinal = pending.length === 1 && pending[0].id === filterId;
         narrate(isFinal ? `${outcome} ${describeFunnelCompletePrompt()}` : outcome);
         return true;
       }
@@ -320,7 +292,7 @@ export function ScreenPage() {
       // Early-return path (e.g. duplicate click while applying). Stay silent.
       return false;
     },
-    [screener, narrate, sequence]
+    [screener, narrate, pending]
   );
 
   const handleIntent = useCallback(
@@ -460,8 +432,6 @@ export function ScreenPage() {
           screener.reset();
           setIntroSpoken(false);
           introQueuedRef.current = false;
-          setUniverseSpoken(false);
-          universeQueuedRef.current = false;
           narrate(describeRestart());
           break;
         case "fallback":
@@ -755,7 +725,10 @@ export function ScreenPage() {
                   stages={screener.stages}
                   pending={pending}
                   intro={{ label: "Introduction", spoken: introSpoken }}
-                  universeSpoken={universeSpoken}
+                  // Universe count is now part of the intro narration
+                  // (no separate echo) — the rail's Universe row flips
+                  // to "checked" alongside Introduction.
+                  universeSpoken={introSpoken}
                   onPendingClick={(filterId) => void applyAndNarrate(filterId)}
                   pendingDisabled={isBusy}
                 />
@@ -805,8 +778,6 @@ export function ScreenPage() {
                         screener.reset();
                         setIntroSpoken(false);
                         introQueuedRef.current = false;
-                        setUniverseSpoken(false);
-                        universeQueuedRef.current = false;
                         narrate(describeRestart());
                       }}
                       disabled={isBusy || screener.stages.length <= 1}

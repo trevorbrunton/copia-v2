@@ -26,6 +26,9 @@ const cases: Array<{ utterance: string; expectKind: string; expectFilter?: strin
   { utterance: "Email me the list", expectKind: "output_email" },
   { utterance: "Send me the list", expectKind: "output_email" },
   { utterance: "Email it to me", expectKind: "output_email" },
+  { utterance: "Email please", expectKind: "output_email" },
+  { utterance: "email", expectKind: "output_email" },
+  { utterance: "Send me an email", expectKind: "output_email" },
 
   // ─── Daily monitoring (Q7) ─────────────────────────────
   { utterance: "Send me a daily email on changes to this screen", expectKind: "monitoring_enable_daily" },

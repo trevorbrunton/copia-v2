@@ -62,15 +62,16 @@ export function describeAppliedFilterFailure(filterId: FilterId, error: string):
 
 /**
  * Follow-up prompt appended to the LAST filter's narration. Invites the
- * user to drill into the remaining stocks. Concatenated into the same
- * echo as the filter outcome (rather than queued as a separate narrate)
- * because Tavus's stopped_speaking event can fire before the client
- * audio buffer fully drains on long final-filter lines, cutting the
- * follow-up in mid-sentence. A single echo with a sentence break gives
- * ElevenLabs natural prosody for the beat without the cut-off risk.
+ * user to drill into the remaining stocks OR ask Pep to email the
+ * shortlist. Concatenated into the same echo as the filter outcome
+ * (rather than queued as a separate narrate) because Tavus's
+ * stopped_speaking event can fire before the client audio buffer fully
+ * drains on long final-filter lines, cutting the follow-up in
+ * mid-sentence. A single echo with a sentence break gives ElevenLabs
+ * natural prosody for the beat without the cut-off risk.
  */
 export function describeFunnelCompletePrompt(): string {
-  return `Now would you like some further details of these remaining stocks? Just ask me, or click on the stocks.`;
+  return `Now would you like some further details of these remaining stocks? Just ask me, or click on the stocks. Or if you'd like me to email you the list of stocks, just say the word!`;
 }
 
 /** Narration for `output_show`. */
@@ -78,9 +79,22 @@ export function describeOutputShow(currentStage: Stage): string {
   return `Showing all ${currentStage.count.toLocaleString()} stocks for ${currentStage.label} in the table.`;
 }
 
-/** Narration for `output_email`. Honest about the demo nature. */
-export function describeOutputEmail(): string {
-  return `I've queued the email — note this is a demo workflow, no email actually leaves the system.`;
+/**
+ * Narration spoken when `output_email` fires — i.e. when the user asks
+ * Pep to email the shortlist. The dispatcher opens the email dialog
+ * straight after; this line bridges the gap so Pep doesn't go silent
+ * while the modal animates in.
+ */
+export function describeOutputEmailPrompt(): string {
+  return `Sure thing — what's the email address?`;
+}
+
+/**
+ * Narration spoken after the user submits the email dialog. Honest
+ * about the demo nature: no email actually leaves the system.
+ */
+export function describeOutputEmailQueued(email: string): string {
+  return `I've queued the email to ${email} — note this is a demo workflow, no email actually leaves the system.`;
 }
 
 /** Narration for `monitoring_enable_daily`. Honest about the demo nature. */

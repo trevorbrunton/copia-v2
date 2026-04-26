@@ -380,6 +380,9 @@ const POST_FUND_INFO_RULES: Rule[] = [
   },
 
   // ─── Output prefs (catch-all) ───────────────────────────────────
+  // Pep's funnel-complete prompt offers "say the word" for email — so
+  // the broader bare-email phrasings ("email please", "email me",
+  // even just "email") are intentionally caught here.
   {
     pattern: /\bemail\b.*\b(?:list|stocks?|results?|me|it)\b/,
     build: () => ({ kind: "output_email" }),
@@ -390,6 +393,13 @@ const POST_FUND_INFO_RULES: Rule[] = [
   },
   {
     pattern: /\bsend\s+me\b.*\b(?:list|stocks?|results?|the\s+list)\b/,
+    build: () => ({ kind: "output_email" }),
+  },
+  {
+    // Bare email-intent — "email please", "send the email", "email me",
+    // or just "email" alone. Anchored to email/mail at sentence start
+    // OR after a sender verb so we don't fire on "send me the list".
+    pattern: /^\s*(?:email|mail)\b|\bemail\s+(?:please|the\s+list|me\s+please)\b|\bsend\s+(?:me\s+)?(?:the\s+)?email\b/,
     build: () => ({ kind: "output_email" }),
   },
   {

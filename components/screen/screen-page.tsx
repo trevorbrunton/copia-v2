@@ -11,6 +11,7 @@ import { StalenessBanner } from "./staleness-banner";
 import { StockFactPanel } from "./stock-fact-panel";
 import { ConversationPane, type TranscriptEntry } from "./conversation-pane";
 import { AvatarVideo } from "./avatar-video";
+import { EmailDialog } from "./email-dialog";
 import {
   QUESTIONNAIRE_FILTERS,
   STAGE_LABELS,
@@ -29,7 +30,8 @@ import {
   describeFunnelComplete,
   describeFunnelCompletePrompt,
   describeMonitoringEnabled,
-  describeOutputEmail,
+  describeOutputEmailPrompt,
+  describeOutputEmailQueued,
   describeOutputShow,
   describePortfolioOverlap,
   describeProcessFact,
@@ -107,6 +109,10 @@ export function ScreenPage() {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  // Email dialog state — opened by the `output_email` intent (post-
+  // funnel-complete) and closed on Send / Cancel. Email send itself is
+  // stubbed; see handleEmailSend below.
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
 
   const sequence = QUESTIONNAIRE_FILTERS;
 
@@ -340,10 +346,15 @@ export function ScreenPage() {
           break;
         }
         case "output_email":
-          toast.success("Email queued — check your inbox.", {
-            description: "Demo workflow — no email is actually sent.",
-          });
-          narrate(describeOutputEmail());
+          // Same funnel-gate as info_stock_field — only invite the
+          // email workflow once all six filters have run, since the
+          // shortlist isn't meaningful before that.
+          if (mode === "screening" && pending.length > 0) {
+            narrate(describeStockFactGatedByFunnel());
+            break;
+          }
+          setEmailDialogOpen(true);
+          narrate(describeOutputEmailPrompt());
           break;
         case "info_stock_field":
           // Hold off on individual-stock lookups until the funnel is
@@ -505,6 +516,26 @@ export function ScreenPage() {
       setSelectedTicker(ticker);
     },
     [mode, pending, narrate]
+  );
+
+  /**
+   * Stub email send — log intent + close the dialog + narrate the
+   * confirmation. No real outbound mail; the demo just acknowledges.
+   * Wire this through to a real /api/v1/screen/email endpoint when
+   * the workflow is productised.
+   */
+  const handleEmailSend = useCallback(
+    (email: string) => {
+      const stage = screener.stages.at(-1);
+      const count = stage?.count ?? 0;
+      console.info("[screen] email send (stub)", { email, shortlistCount: count });
+      toast.success(`Email queued for ${email}`, {
+        description: "Demo workflow — no email is actually sent.",
+      });
+      setEmailDialogOpen(false);
+      narrate(describeOutputEmailQueued(email));
+    },
+    [screener.stages, narrate]
   );
 
   /**
@@ -928,6 +959,12 @@ export function ScreenPage() {
           )}
         </section>
       </main>
+      <EmailDialog
+        open={emailDialogOpen}
+        onOpenChange={setEmailDialogOpen}
+        shortlistCount={screener.stages.at(-1)?.count ?? 0}
+        onSend={handleEmailSend}
+      />
     </div>
   );
 }

@@ -12,8 +12,8 @@ export default function LandingPage() {
           OC Funds Management
         </h1>
         <p className="text-lg text-muted-foreground max-w-lg">
-          Meet Robert Frost, Head of Investments at the OC Mid-Cap Fund.
-          Ask questions and get instant answers powered by AI.
+          A curated demonstration of the OC Funds Managment stock filtering
+          process.
         </p>
       </div>
       <Link

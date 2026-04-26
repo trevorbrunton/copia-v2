@@ -33,7 +33,7 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
       return `This filter narrows the universe to the top one hundred companies by market cap — a starting cut for this walk-through that focuses on the largest names. ${c} stocks remain.`;
     case "q3_turnover_20":
     case "m6_sufficient_liquidity":
-      return `This filter screens for sufficient liquidity. We use an annual turnover ratio of at least twenty percent as the proxy — it ensures positions can be entered and exited at sensible prices without moving the market. ${c} stocks meet that bar.`;
+      return `This filter screens for sufficient liquidity. We require an annual turnover ratio of at least twenty percent. ${c} stocks meet that bar.`;
     case "q4_profitable":
     case "m2_profitable":
       return `This filter screens for profitability. We exclude any stock that isn't profitable on a trailing-twelve-month basis — OC don't invest in loss-makers, and this discipline weeds out speculative names that haven't proven their business model. ${c} profitable stocks remain.`;
@@ -47,7 +47,7 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
         : `This filter excludes companies with unproven or complex technologies — businesses where the model isn't proven or future cash flows are too speculative to value. Based on a curated demo flag. ${c} stocks remain.`;
     case "q6_single_commodity":
     case "m5_exclude_single_commodity":
-      return `This filter excludes single-commodity and single-mine resource stocks. They tend to have significant earnings volatility because they're exposed to one commodity cycle — OC's discipline avoids that concentrated risk. Based on a curated reference list. ${c} stocks remain.`;
+      return `This filter excludes single-commodity and single-mine resource stocks. They tend to have significant earnings volatility because they're exposed to one commodity cycle — OC's discipline avoids that concentrated risk. ${c} stocks remain.`;
     case "m7_exclude_asx_100":
       return `The final cut: we exclude the ASX 100 names. OC is a small and mid-cap manager — the top one hundred isn't their hunting ground. What's left is the OC initial screen — ${c} stocks form the investable universe for the OC Premium Small Companies Fund.`;
     default:
@@ -58,6 +58,17 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
 /** Narration when a stage's filter fails. */
 export function describeAppliedFilterFailure(filterId: FilterId, error: string): string {
   return `Couldn't apply ${filterId.replace(/_/g, " ")}: ${error}.`;
+}
+
+/**
+ * Follow-up prompt narrated after the LAST filter in either preset
+ * has applied. Invites the user to drill into the remaining stocks.
+ * Fires through the same narrate() queue so it lands after the
+ * inter-narration pause — Pep gets a beat between announcing the
+ * final count and asking the follow-up.
+ */
+export function describeFunnelCompletePrompt(): string {
+  return `Now would you like some further details of these remaining stocks? Just ask me, or click on the stocks.`;
 }
 
 /** Narration for `output_show`. */

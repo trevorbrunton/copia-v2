@@ -28,6 +28,7 @@ import {
   describeFundFactMissingCategory,
   describeFundFactMissingFund,
   describeFunnelComplete,
+  describeFunnelCompletePrompt,
   describeMethodologyIntro,
   describeMethodologyTransition,
   describeMonitoringEnabled,
@@ -61,12 +62,13 @@ const FUNDS = listFunds();
 /**
  * Pause after each narrate() echo before releasing the queue for the
  * next call. Tavus's `stopped_speaking` event fires when the server
- * stops streaming audio, but the client-side buffer can still have a
- * few hundred ms of audio trailing — the pause lets it drain so the
- * next echo doesn't interrupt the tail of the current one. Also gives
- * the audience a natural beat between thoughts.
+ * stops generating audio, but the client-side WebRTC + audio-context
+ * buffer can still have ~1s of trailing audio on longer lines. The
+ * pause lets it drain so the next echo doesn't interrupt the tail of
+ * the current one. Also gives the audience a natural beat between
+ * thoughts. Bump higher if you still hear cut-offs on long lines.
  */
-const INTER_NARRATION_PAUSE_MS = 750;
+const INTER_NARRATION_PAUSE_MS = 1500;
 
 // Single configured Pep persona — must be `pipeline_mode: "echo"` per
 // docs/TAVUS-PERSONA-SETUP.md. Read once at module load; surfaced as a
@@ -279,6 +281,12 @@ export function ScreenPage() {
       const stage = await screener.applyFilter(filterId);
       if (stage) {
         narrate(describeAppliedFilter(filterId, stage.count, prevCount));
+        // If this was the final filter in the active preset's sequence,
+        // queue the follow-up prompt — narrate() chains it so it plays
+        // after the filter result + inter-narration pause.
+        if (filterId === sequence[sequence.length - 1]) {
+          narrate(describeFunnelCompletePrompt());
+        }
         return true;
       }
       const errAfter = screener.error;
@@ -289,7 +297,7 @@ export function ScreenPage() {
       // Early-return path (e.g. duplicate click while applying). Stay silent.
       return false;
     },
-    [screener, narrate]
+    [screener, narrate, sequence]
   );
 
   /**

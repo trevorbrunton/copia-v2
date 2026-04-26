@@ -39,6 +39,7 @@ import {
   describeRestart,
   describeStockFactRequest,
   describeStockFactUnresolved,
+  describeUniverseStage,
 } from "@/src/screen/narration";
 import {
   CATEGORY_IDS,
@@ -204,6 +205,36 @@ export function ScreenPage() {
     queueMicrotask(() => narrateIntroFor(preset));
   }, [isStarted, tavusStatus, mode, preset, introSpokenForPreset, narrateIntroFor]);
 
+  // Universe narration: fires once per session, after the intro is
+  // spoken for the active preset. Tavus persona-side TTS queues
+  // echoes server-side so the universe line follows the intro
+  // sequentially rather than overlapping. The ref guard mirrors the
+  // openingSpokenRef pattern — synchronous (so a re-rendered effect
+  // doesn't queue a duplicate microtask) and not subject to the
+  // React 19 set-state-in-effect lint rule. Reset on funnel reset
+  // mutates the ref directly from the click handler.
+  const universeNarratedRef = useRef(false);
+  const universeStage = screener.stages[0];
+  useEffect(() => {
+    if (universeNarratedRef.current) return;
+    if (!isStarted) return;
+    if (tavusStatus !== "ready") return;
+    if (mode !== "screening") return;
+    if (introSpokenForPreset !== preset) return;
+    if (!universeStage) return;
+    universeNarratedRef.current = true;
+    const count = universeStage.count;
+    queueMicrotask(() => narrate(describeUniverseStage(count)));
+  }, [
+    isStarted,
+    tavusStatus,
+    mode,
+    preset,
+    introSpokenForPreset,
+    universeStage,
+    narrate,
+  ]);
+
   /**
    * Apply a filter and narrate the outcome.
    *
@@ -352,6 +383,7 @@ export function ScreenPage() {
         case "restart":
           screener.reset();
           setIntroSpokenForPreset(null);
+          universeNarratedRef.current = false;
           narrate(describeRestart());
           break;
         case "fallback":
@@ -665,6 +697,7 @@ export function ScreenPage() {
                       onClick={() => {
                         screener.reset();
                         setIntroSpokenForPreset(null);
+                        universeNarratedRef.current = false;
                         narrate(describeRestart());
                       }}
                       disabled={isBusy || screener.stages.length <= 1}

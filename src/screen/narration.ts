@@ -115,6 +115,15 @@ export function describeInitialScreenStart(): string {
 }
 
 /**
+ * Narration for the starting universe stage — the unfiltered ASX
+ * universe that the funnel begins from. Fires after the intro so the
+ * audience hears the count grounded against the spoken framing.
+ */
+export function describeUniverseStage(count: number): string {
+  return `We're starting from the full ASX universe — about ${count.toLocaleString()} listed companies in this snapshot.`;
+}
+
+/**
  * Spoken introduction for the Questionnaire (Pep's 8 Qs) preset.
  * Source: docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt §1.2 +
  * §2.2 + §2.7 — OC's investment philosophy and the FSC-questionnaire-

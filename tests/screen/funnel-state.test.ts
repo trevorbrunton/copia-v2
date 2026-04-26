@@ -173,7 +173,7 @@ describe("applyFilterToState", () => {
     expect(new Set(s.current.tickers)).toEqual(new Set(["MID"]));
   });
 
-  it("Q2 (top 100) preserves order by mcap desc and caps at 100", () => {
+  it("Q2 (exclude top 100) drops the largest 100 by mcap, keeps the rest in mcap-desc order", () => {
     const big = Array.from({ length: 150 }, (_, i): FilterableSecurity => ({
       ticker: `T${String(i).padStart(3, "0")}`,
       market_cap_snapshot: 1_000_000_000 - i,
@@ -185,10 +185,11 @@ describe("applyFilterToState", () => {
       is_single_commodity_or_single_mine: false,
     }));
     const s0 = initScreenState(SNAPSHOT, big);
-    const s1 = applyFilterToState(s0, "q2_top_100", big);
-    expect(s1.current.count).toBe(100);
-    expect(s1.current.tickers[0]).toBe("T000");
-    expect(s1.current.tickers[99]).toBe("T099");
+    const s1 = applyFilterToState(s0, "q2_exclude_top_100", big);
+    expect(s1.current.count).toBe(50);
+    // Top 100 (T000..T099) excluded; T100 is now first.
+    expect(s1.current.tickers[0]).toBe("T100");
+    expect(s1.current.tickers[49]).toBe("T149");
   });
 
   it("treats `current.tickers` as the input set (composability)", () => {

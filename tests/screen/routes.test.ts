@@ -73,16 +73,20 @@ describe.skipIf(!SHOULD_RUN)("POST /api/v1/screen/apply-filter", () => {
     expect(body.stage.tickers).toContain("CBA");
   });
 
-  it("Q2 from Q1 puts CBA / BHP / RIO at the top by market cap", async () => {
+  it("Q2 from Q1 excludes CBA / BHP / RIO (the largest names by market cap)", async () => {
     const q1 = (await (
       await applyFilterPOST(jsonRequest({ filterId: "q1_mcap_50m" }))
     ).json()) as { stage: { tickers: string[] } };
     const res = await applyFilterPOST(
-      jsonRequest({ filterId: "q2_top_100", fromTickers: q1.stage.tickers })
+      jsonRequest({ filterId: "q2_exclude_top_100", fromTickers: q1.stage.tickers })
     );
     const body = (await res.json()) as { stage: { count: number; tickers: string[] } };
-    expect(body.stage.count).toBe(100);
-    expect(body.stage.tickers.slice(0, 3)).toEqual(["CBA", "BHP", "RIO"]);
+    // Drops the top 100 by mcap from the post-Q1 set, keeps the rest.
+    expect(body.stage.count).toBe(q1.stage.tickers.length - 100);
+    const tickerSet = new Set(body.stage.tickers);
+    for (const top of ["CBA", "BHP", "RIO"]) {
+      expect(tickerSet.has(top)).toBe(false);
+    }
   });
 });
 

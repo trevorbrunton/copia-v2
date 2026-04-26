@@ -11,24 +11,24 @@
       "count": 940
     },
     {
-      "stage": "q2_top_100",
-      "count": 100
+      "stage": "q2_exclude_top_100",
+      "count": 840
     },
     {
       "stage": "q3_turnover_20",
-      "count": 86
+      "count": 600
     },
     {
       "stage": "q4_profitable",
-      "count": 79
+      "count": 201
     },
     {
       "stage": "q5_unproven_tech",
-      "count": 79
+      "count": 201
     },
     {
       "stage": "q6_single_commodity",
-      "count": 65
+      "count": 201
     }
   ],
   "methodology_preset": [

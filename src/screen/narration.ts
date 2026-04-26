@@ -29,8 +29,8 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
     case "q1_mcap_50m":
     case "m1_mcap_50m":
       return `This filter is based on market capitalisation. We set a threshold of greater than fifty million dollars — small enough to capture mid- and small-caps, large enough to exclude the illiquid micro-cap end. ${c} stocks meet the criterion.`;
-    case "q2_top_100":
-      return `This filter narrows the universe to the top one hundred companies by market cap — a starting cut for this walk-through that focuses on the largest names. ${c} stocks remain.`;
+    case "q2_exclude_top_100":
+      return `This filter excludes the top one hundred companies by market cap. OC is a small and mid-cap manager — the largest names aren't their hunting ground, so we strip them out and focus on what's left. ${c} stocks remain.`;
     case "q3_turnover_20":
     case "m6_sufficient_liquidity":
       return `This filter screens for sufficient liquidity. We require an annual turnover ratio of at least twenty percent. ${c} stocks meet that bar.`;

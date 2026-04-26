@@ -25,7 +25,7 @@ export const FILTER_THRESHOLDS = {
 export const STAGE_IDS = {
   UNIVERSE: "universe",
   Q1_MCAP_50M: "q1_mcap_50m",
-  Q2_TOP_100: "q2_top_100",
+  Q2_EXCLUDE_TOP_100: "q2_exclude_top_100",
   Q3_TURNOVER_20: "q3_turnover_20",
   Q4_PROFITABLE: "q4_profitable",
   Q5_UNPROVEN_TECH: "q5_unproven_tech",
@@ -44,7 +44,7 @@ export type StageId = (typeof STAGE_IDS)[keyof typeof STAGE_IDS];
 export const STAGE_LABELS: Record<StageId, string> = {
   universe: "Universe",
   q1_mcap_50m: "Market cap > $50m",
-  q2_top_100: "Top 100 by market cap",
+  q2_exclude_top_100: "Exclude top 100 by market cap",
   q3_turnover_20: "Turnover ≥ 20%",
   q4_profitable: "Profitable (TTM)",
   q5_unproven_tech: "Exclude unproven / complex tech",
@@ -93,7 +93,7 @@ export type FilterId = Exclude<StageId, "universe">;
 const STAGE_TO_FILTER_ID: Record<StageId, FilterId | null> = {
   universe: null,
   q1_mcap_50m: "q1_mcap_50m",
-  q2_top_100: "q2_top_100",
+  q2_exclude_top_100: "q2_exclude_top_100",
   q3_turnover_20: "q3_turnover_20",
   q4_profitable: "q4_profitable",
   q5_unproven_tech: "q5_unproven_tech",
@@ -131,10 +131,16 @@ export function applyOneFilter(
       return rows.filter(
         (r) => r.market_cap_snapshot !== null && r.market_cap_snapshot > FILTER_THRESHOLDS.MCAP_MIN_AUD
       );
-    case STAGE_IDS.Q2_TOP_100:
+    case STAGE_IDS.Q2_EXCLUDE_TOP_100: {
+      // Per the brief Q2: "take that list and take out the top 100 by
+      // market cap" — OC is a small-/mid-cap manager, so the largest
+      // names are intentionally excluded. Sort desc by mcap, drop the
+      // top N, keep the rest. Operates on the post-Q1 set so it's
+      // relative to whatever's currently in scope, not the full ASX.
       return [...rows]
         .sort((a, b) => (b.market_cap_snapshot ?? 0) - (a.market_cap_snapshot ?? 0))
-        .slice(0, FILTER_THRESHOLDS.TOP_N_BY_MCAP);
+        .slice(FILTER_THRESHOLDS.TOP_N_BY_MCAP);
+    }
     case STAGE_IDS.Q3_TURNOVER_20:
     case STAGE_IDS.M6_SUFFICIENT_LIQUIDITY:
       return rows.filter(
@@ -186,7 +192,7 @@ export function makeStage(
  */
 export const QUESTIONNAIRE_FILTERS: readonly FilterId[] = [
   STAGE_IDS.Q1_MCAP_50M,
-  STAGE_IDS.Q2_TOP_100,
+  STAGE_IDS.Q2_EXCLUDE_TOP_100,
   STAGE_IDS.Q3_TURNOVER_20,
   STAGE_IDS.Q4_PROFITABLE,
   STAGE_IDS.Q5_UNPROVEN_TECH,

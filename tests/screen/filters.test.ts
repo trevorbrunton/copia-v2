@@ -44,7 +44,7 @@ describe("Questionnaire preset", () => {
     expect(stages.map((s) => s.id)).toEqual([
       STAGE_IDS.UNIVERSE,
       STAGE_IDS.Q1_MCAP_50M,
-      STAGE_IDS.Q2_TOP_100,
+      STAGE_IDS.Q2_EXCLUDE_TOP_100,
       STAGE_IDS.Q3_TURNOVER_20,
       STAGE_IDS.Q4_PROFITABLE,
       STAGE_IDS.Q5_UNPROVEN_TECH,

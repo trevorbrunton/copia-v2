@@ -41,8 +41,8 @@ const cases: Array<{ utterance: string; expectKind: string; expectFilter?: strin
   // ─── Funnel filters (Questionnaire path) ───────────────
   { utterance: "Show me ASX stocks with a market cap of more than 50 million dollars", expectKind: "apply_filter", expectFilter: "q1_mcap_50m" },
   { utterance: "Stocks with market cap above $50m", expectKind: "apply_filter", expectFilter: "q1_mcap_50m" },
-  { utterance: "Take the top 100 by market cap", expectKind: "apply_filter", expectFilter: "q2_top_100" },
-  { utterance: "Top 100", expectKind: "apply_filter", expectFilter: "q2_top_100" },
+  { utterance: "Take out the top 100 by market cap", expectKind: "apply_filter", expectFilter: "q2_exclude_top_100" },
+  { utterance: "Top 100", expectKind: "apply_filter", expectFilter: "q2_exclude_top_100" },
   { utterance: "Filter to stocks with annual turnover of at least 20%", expectKind: "apply_filter", expectFilter: "q3_turnover_20" },
   { utterance: "Turnover above 20 percent", expectKind: "apply_filter", expectFilter: "q3_turnover_20" },
   { utterance: "Remove unprofitable companies", expectKind: "apply_filter", expectFilter: "q4_profitable" },

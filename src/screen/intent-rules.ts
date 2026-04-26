@@ -238,10 +238,13 @@ const RULES: Rule[] = [
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q1_MCAP_50M }),
   },
 
-  // Q2: top 100 by mcap
+  // Q2: exclude top 100 by mcap (OC is small/mid-cap — largest names
+  // are out of scope). Triggers on "top 100" phrasing in either form
+  // ("take out the top 100" or just "top 100" alone) since the only
+  // Q2-related ask in the pitch is to remove them.
   {
     pattern: /\btop\s+(?:one\s+)?100\b/,
-    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q2_TOP_100 }),
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q2_EXCLUDE_TOP_100 }),
   },
 
   // Q3: turnover ≥ 20%

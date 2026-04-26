@@ -111,10 +111,39 @@ describe("resolveEntity — fuzzy single-token (typos / mispronunciations)", () 
     expect(resolveEntity("commonwelth bank price", TEST_DATA)?.ticker).toBe("CBA");
   });
 
-  it("returns null when the typo is too far (>2 edits)", () => {
-    // 'westxpyz' differs from 'westpac' by 4 edits — beyond the
-    // FUZZY_MAX_DISTANCE = 2 threshold.
+  it("returns null when the typo is too far", () => {
+    // 'westxpyz' differs from 'westpac' by 4 edits, beyond the 2-edit
+    // allowance for an 8-char token.
     expect(resolveEntity("tell me about westxpyz", TEST_DATA)).toBeNull();
+  });
+
+  it("uses a looser allowance (≤3) for ≥10-char tokens", () => {
+    // 'commonweath' (11 chars) → 'commonwealth' (12 chars) is 1 edit;
+    // older flat-distance rule would've caught this too. The 3-edit
+    // band shows up on harder cases like 'commenweelth' (12 chars),
+    // distance 2 from 'commonwealth' — caught here, would have failed
+    // under the old flat rule on a longer mispronunciation.
+    expect(resolveEntity("commenweelth bank price", TEST_DATA)?.ticker).toBe("CBA");
+  });
+});
+
+describe("resolveEntity — initialism handling (B H P → BHP)", () => {
+  it("matches space-separated single letters → ticker", () => {
+    expect(resolveEntity("what's B H P doing today", TEST_DATA)?.ticker).toBe("BHP");
+  });
+
+  it("matches dot-separated single letters", () => {
+    expect(resolveEntity("tell me about C.B.A.", TEST_DATA)?.ticker).toBe("CBA");
+  });
+
+  it("works for case-insensitive single letters", () => {
+    expect(resolveEntity("a 2 m earnings", TEST_DATA)?.ticker).toBe("A2M");
+  });
+
+  it("doesn't false-match unrelated single letters", () => {
+    // No ticker spells out from 'I A M Z X' (none of those concats
+    // hit the test set's tickers).
+    expect(resolveEntity("I A M Z X please", TEST_DATA)).toBeNull();
   });
 });
 

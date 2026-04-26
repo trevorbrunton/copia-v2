@@ -42,8 +42,21 @@ export type ResolvedEntity = {
 const SINGLE_TOKEN_MIN_LEN = 6;
 /** Bigram-eligible token length — looser, since the bigram pair is the discriminator. */
 const BIGRAM_TOKEN_MIN_LEN = 4;
-/** Max edit distance for the fuzzy single-token pass. */
-const FUZZY_MAX_DISTANCE = 2;
+
+/**
+ * Fuzzy edit-distance allowance scales with the longer of the two
+ * tokens being compared. Stricter for short names where 2 edits would
+ * match too much; more permissive for long names where mispronunciations
+ * commonly drop or insert syllables. Calibrated so Levenshtein still
+ * stays sub-millisecond against the full ~2000-name snapshot.
+ */
+function fuzzyAllowance(longerLen: number): number {
+  if (longerLen <= 5) return 1;
+  if (longerLen <= 9) return 2;
+  return 3;
+}
+/** Min token length entering the fuzzy pass at all (text and name sides). */
+const FUZZY_MIN_TOKEN_LEN = 5;
 
 const NAME_STOPWORDS = new Set([
   "limited",
@@ -62,7 +75,32 @@ function escapeRegExp(s: string): string {
 
 function extractTickerCandidates(text: string): string[] {
   const upper = text.toUpperCase();
-  return Array.from(upper.matchAll(/\b[A-Z0-9]{2,5}\b/g)).map((m) => m[0]);
+  const candidates = Array.from(upper.matchAll(/\b[A-Z0-9]{2,5}\b/g)).map((m) => m[0]);
+  // Initialism handling — STT often transcribes spelled-out tickers as
+  // "B H P" (single letters / digits separated by spaces or dots)
+  // rather than "BHP". Find runs of consecutive single-character
+  // tokens and emit every consecutive sub-run of length 2-5 as a
+  // candidate. We can't rely on a single regex with `matchAll` here:
+  // it's non-overlapping and greedy, so e.g. "what'S B H P" would
+  // match "S B H P" → "SBHP" and skip the embedded "BHP".
+  const tokens = upper.split(/[^A-Z0-9]+/).filter((t) => t.length > 0);
+  let i = 0;
+  while (i < tokens.length) {
+    if (tokens[i].length !== 1) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < tokens.length && tokens[j].length === 1) j++;
+    const runLen = j - i;
+    for (let len = 2; len <= Math.min(5, runLen); len++) {
+      for (let start = i; start <= j - len; start++) {
+        candidates.push(tokens.slice(start, start + len).join(""));
+      }
+    }
+    i = j;
+  }
+  return candidates;
 }
 
 function tickerPass(text: string, tickers: Set<string>): string | null {
@@ -193,26 +231,30 @@ function joinedTokenPass(text: string, nameByTicker: Map<string, string>): strin
 }
 
 /**
- * Fuzzy single-token pass — for each ≥6-char name token, checks whether
- * any ≥6-char text token is within Levenshtein distance ≤ 2. Catches
- * typos and mispronunciations: "telestra" → TLS, "wesfarmer" → WES,
- * "westpack" → WBC.
+ * Fuzzy single-token pass — Levenshtein-bounded match between text
+ * tokens and name tokens. Per-pair distance allowance scales with the
+ * longer of the two via `fuzzyAllowance` (stricter for short names,
+ * more permissive for long ones where mispronunciations commonly drop
+ * or insert syllables). Catches "telestra" → TLS, "wesfarmer" → WES,
+ * "westpack" → WBC, "macquarie" mistranscribed as "macquaree" → MQG,
+ * "fortescue" mistranscribed as "fortesque" → FMG.
  *
- * Length-difference pre-filter and bounded Levenshtein keep the cost
- * down — pathological case is O(|tickers| * |textTokens| * 6 * max),
- * which for ~2000 ASX names + a 5-word utterance is well under 1 ms.
+ * Both sides require ≥ FUZZY_MIN_TOKEN_LEN chars (5 today). Per-pair
+ * length-difference pre-filter + bounded Levenshtein with early row-
+ * minimum termination keeps it sub-millisecond against ~2000 names.
  */
 function fuzzyTokenPass(text: string, nameByTicker: Map<string, string>): string | null {
-  const candidates = textTokens(text, SINGLE_TOKEN_MIN_LEN);
+  const candidates = textTokens(text, FUZZY_MIN_TOKEN_LEN);
   if (candidates.length === 0) return null;
   const hits = new Set<string>();
   for (const [ticker, name] of nameByTicker) {
-    const nameToks = nameTokens(name, SINGLE_TOKEN_MIN_LEN);
+    const nameToks = nameTokens(name, FUZZY_MIN_TOKEN_LEN);
     let matched = false;
     for (const nt of nameToks) {
       for (const ct of candidates) {
-        if (Math.abs(nt.length - ct.length) > FUZZY_MAX_DISTANCE) continue;
-        if (levenshtein(nt, ct, FUZZY_MAX_DISTANCE) <= FUZZY_MAX_DISTANCE) {
+        const allowance = fuzzyAllowance(Math.max(nt.length, ct.length));
+        if (Math.abs(nt.length - ct.length) > allowance) continue;
+        if (levenshtein(nt, ct, allowance) <= allowance) {
           matched = true;
           break;
         }

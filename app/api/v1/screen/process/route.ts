@@ -97,6 +97,19 @@ export async function POST(req: Request) {
       }
     }
 
+    // Bare ticker / company name → assume "give me details on X". When
+    // neither the rule layer nor the classifier matched anything, try
+    // the entity resolver one more time. If it pins down a single
+    // stock, route as info_stock_field with no field — the dispatcher
+    // opens the StockFactPanel and Pep narrates the lookup. Saves the
+    // user from having to phrase it as a full sentence.
+    if (enriched.kind === "fallback") {
+      const resolved = await entityResolver.resolve(text);
+      if (resolved) {
+        enriched = { kind: "info_stock_field", ticker: resolved.ticker };
+      }
+    }
+
     logger.info(
       {
         traceId,

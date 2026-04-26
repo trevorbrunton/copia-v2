@@ -14,6 +14,25 @@ function assertNever(x: never): never {
 }
 
 /**
+ * Narration when the user re-requests a filter that's already been
+ * applied this session. Quietly tells them where to go next instead of
+ * re-running and duplicating the stage in the rail.
+ */
+export function describeFilterAlreadyApplied(filterLabel: string): string {
+  return `${filterLabel} has already run — pick a different filter from the rail or just say which one you want next.`;
+}
+
+/**
+ * Narration when an applyFilter call was silently dropped because
+ * another filter was still in flight. The button is normally disabled
+ * during apply but a fast click can sneak through before the disabled
+ * state propagates. Tells the user what happened so they retry.
+ */
+export function describeFilterBusy(): string {
+  return `Hold on a second — let me finish the previous step. Click again in a moment.`;
+}
+
+/**
  * Narration for a successfully-applied filter. `count` is the number
  * of stocks remaining after the filter; `prevCount` is what was there
  * before (used to phrase Q5's "no change" outcome).

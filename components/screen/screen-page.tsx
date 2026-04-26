@@ -24,6 +24,8 @@ import {
   describeAppliedFilter,
   describeAppliedFilterFailure,
   describeFallback,
+  describeFilterAlreadyApplied,
+  describeFilterBusy,
   describeFundFact,
   describeFundFactMissingCategory,
   describeFundFactMissingFund,
@@ -281,13 +283,27 @@ export function ScreenPage() {
   /**
    * Apply a filter and narrate the outcome.
    *
-   * `applyFilter` returns null both on real failures AND on early-return
-   * paths (in-flight, wrong status, no current stage). To distinguish
-   * "didn't run" from "ran and failed" we capture `screener.error`
-   * before the call and only narrate failure if a NEW error was set.
+   * Three protective branches before the actual apply:
+   *  - Idempotency: if `filterId` is already in `completedStageIds`,
+   *    narrate a friendly "already run" line and skip. Without this
+   *    guard, a re-click duplicates the stage in the rail.
+   *  - Silent-drop detection: `screener.applyFilter` returns null both
+   *    on real failures AND on the `applyInFlightRef` early return.
+   *    We capture `screener.error` before/after the call and emit one
+   *    of three branches: (a) success → outcome narration, (b) new
+   *    error → failure narration, (c) silent drop → busy narration.
+   *    The previous "stay silent" branch on (c) was confusing because
+   *    the user couldn't tell if their click registered.
    */
   const applyAndNarrate = useCallback(
     async (filterId: FilterId): Promise<boolean> => {
+      // Idempotency — never re-apply a completed filter.
+      if (screener.stages.some((s) => s.id === filterId)) {
+        console.info("[screen] applyAndNarrate skipped (already applied)", { filterId });
+        narrate(describeFilterAlreadyApplied(STAGE_LABELS[filterId]));
+        return false;
+      }
+
       const prevCount = screener.stages.at(-1)?.count ?? 0;
       const errBefore = screener.error;
       const stage = await screener.applyFilter(filterId);
@@ -310,7 +326,12 @@ export function ScreenPage() {
         narrate(describeAppliedFilterFailure(filterId, errAfter));
         return false;
       }
-      // Early-return path (e.g. duplicate click while applying). Stay silent.
+      // Silent-drop path — applyFilter returned null without setting a
+      // new error, which means `applyInFlightRef.current` was true
+      // (a click slipped through before the disabled state propagated).
+      // Tell the user so they retry.
+      console.warn("[screen] applyAndNarrate silently dropped (in-flight)", { filterId });
+      narrate(describeFilterBusy());
       return false;
     },
     [screener, narrate, pending]

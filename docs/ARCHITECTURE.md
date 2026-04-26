@@ -2,13 +2,21 @@
 
 System architecture for the **Pep Avatar v2** screening demo at `/demo/screen` plus the standard Supabase auth shell at `/dashboard` and `/settings`.
 
-**Companion document:** [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) — external services, environment variables, deployment.
+**Companion documents:**
+- [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) — external services, environment variables, deployment.
+- [PROCESSING-STREAMS.md](./PROCESSING-STREAMS.md) — every concurrent processing stream and when each is active.
 
 ---
 
 ## What the app does
 
-A live, voice-driven OC Mid-Cap screening demo: an investor speaks to **Pep**, an animated Tavus avatar that lip-syncs in a cloned voice. The screening engine answers eight scripted questions plus paraphrases by progressively filtering the ASX universe (~1,979 stocks) against curated criteria. Snapshot-backed (no live market data); deterministic where possible (rule-first matcher), with an Anthropic Haiku fallback for paraphrases.
+A live, voice-driven OC Funds screening demo: an investor speaks to **Pep**, an animated Tavus avatar that lip-syncs in a cloned voice. The page exposes three modes that share one Tavus session and one voice-listener pipeline:
+
+- **Screening** — walk the OC questionnaire funnel (six filters reducing the ASX universe of ~1,979 stocks down to a shortlist). Filters can run linearly via the *Next filter →* button, out of sequence by clicking any pending step in the rail, or by voice ("run the profitability filter").
+- **Process Q&A** — twelve curated topics drawn from the OC FSC questionnaire (philosophy, style, universe, research, stock selection, portfolio construction, risk management, ESG, corporate governance, transaction costs, tax, team).
+- **Fund Q&A** — three OC funds × twenty-one categories of pre-scripted answers (fees, distributions, target market, etc.) read from `data/fund-qa.json`.
+
+All three modes route through the same intent classifier and narration queue. Snapshot-backed (no live market data); deterministic where possible (rule-first matcher), with an Anthropic Haiku fallback for paraphrases.
 
 Beyond the public demo, the app keeps a small Supabase-backed dashboard / settings surface for authenticated users — sessions, devices, login history, profile CRUD. Useful as a foundation if the demo turns into a product, but not exercised in the pitch.
 
@@ -92,9 +100,15 @@ The demo path is hot, simple, and stateless — adding the layered CQRS would ju
 
 `app/api/v1/screen/process/route.ts` accepts both **multipart audio** (PCM blob + sample rate) and **JSON text**. Multipart calls go through `transcribePcm()` (`src/screen/stt.ts` — ElevenLabs `scribe_v1`, 12 s timeout). After transcription, the text is classified:
 
-1. **Rule layer first** — `matchIntentRule()` in `src/screen/intent-rules.ts`. Deterministic regex/keyword matches that cover the eight scripted questions verbatim and a wide set of paraphrases. Zero external calls when a rule hits.
+1. **Rule layer first** — `matchIntentRule()` in `src/screen/intent-rules.ts`. Three ordered passes:
+   - `RULES` — navigation, funnel-filter triggers (e.g. "market cap > 50m" → Q1; "run the profitability filter" → Q4), Q7 daily-monitoring, Q8 portfolio overlap.
+   - `matchFundInfoRule` — fires only when a fund name is present (e.g. "OC Mid-Cap Fund's fees" → `info_fund_field`).
+   - `matchProcessInfoRule` — fires on a process-topic keyword without needing a name gate (e.g. "OC's investment philosophy" → `info_process_field`).
+   - `POST_FUND_INFO_RULES` — generic stock-fact catch-alls (`info_stock_field`) and output preferences. Sit last so they don't hijack the more specific intents.
+
+   Zero external calls when a rule hits.
 2. **Anthropic Haiku fallback** — `anthropicClassifier()` in `src/screen/screen-matcher.ts`. Constrained-output classification with a Zod schema validating the model's reply. 5 s timeout; on failure or schema mismatch returns `{ kind: "fallback" }`.
-3. **Entity resolver** — `EntityResolver` in `src/screen/entity-resolver.ts` resolves company-name fallbacks (e.g. "commonwealth bank" → CBA) for `info_stock_field` intents. Cache keyed by snapshot id.
+3. **Entity resolver** — `EntityResolver` in `src/screen/entity-resolver.ts` resolves company-name fallbacks (e.g. "commonwealth bank" → CBA) for `info_stock_field` intents. Two passes: ticker token (uppercase 2–5 chars matched against the snapshot ticker set) then company name (bigram match on ≥4-char tokens, single-token fallback on ≥6-char tokens with a stop-word list). Cache keyed by snapshot id.
 
 The route is **rate-limited** per IP (30/min, 200/hour) via `src/server/rate-limit.ts`.
 
@@ -102,15 +116,32 @@ The route is **rate-limited** per IP (30/min, 200/hour) via `src/server/rate-lim
 
 `src/screen/funnel.ts` is the pure filter engine — `applyOneFilter`, `applyQuestionnairePreset`, `applyMethodologyPreset`, plus `STAGE_IDS`, `STAGE_LABELS`, and `FILTER_THRESHOLDS` constants. Each preset is a `FilterId[]` reduced through `applyOneFilter`, so the filter logic has one source of truth.
 
+The Q2 filter (`q2_exclude_top_100`) **excludes** the top 100 by market cap — OC is a small/mid-cap manager and the largest names are intentionally out of scope. The post-Q1 set is sorted desc by mcap and the top 100 are dropped.
+
+The `M*` methodology filters (`m1_mcap_50m` through `m7_exclude_asx_100`) and `applyMethodologyPreset` remain in the engine for the ingest script and snapshot-fixture tests, but no UI surface reaches them — the methodology funnel was replaced by Process Q&A.
+
 `src/screen/state.ts` is a pure reducer over `ScreenState` (`appliedFilters`, `currentStage`, `appliedAt` timestamps).
 
-`src/screen/use-screener.ts` is the React hook that holds `ScreenState`, calls `/api/v1/screen/apply-filter` for each step, and tracks an `applyInFlightRef` so rapid programmatic calls don't race.
+`src/screen/use-screener.ts` is the React hook that holds `ScreenState`, calls `/api/v1/screen/apply-filter` for each step, and tracks an `applyInFlightRef` so rapid programmatic calls don't race. Filters can be applied in any order; `applyFilter(filterId)` always operates on the current stage's tickers regardless of where that filter sits in the canonical sequence.
 
 ### Snapshot cache
 
 `src/screen/snapshot-cache.ts` holds the active ASX snapshot in-process, behind a 60-second TTL with a single-flight in-flight promise so concurrent requests collapse to one DB load. Both `/api/v1/screen/snapshot` and `/api/v1/screen/apply-filter` read from it. The snapshot is loaded as two parallel projections — `SecurityForClient[]` for the wide UI shape and a `Map<ticker, FilterableSecurity>` for O(1) filter input lookups.
 
 `/api/v1/screen/snapshot` also carries `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=3600`, so Vercel's edge fronts repeat sessions across instances.
+
+### Q&A banks (Process Q&A + Fund Q&A)
+
+Two static JSON banks back the non-screening modes. Both follow the same pattern: a typed loader bundles the JSON via Next's import resolver, narrows it to a TypeScript shape, and runs a **bidirectional drift assertion at module load** so a JSON edit out of step with the TypeScript union fails loudly at boot.
+
+| Bank | JSON | Loader | Shape | Source |
+|---|---|---|---|---|
+| **Process Q&A** | `data/process-qa.json` | `src/screen/process-qa.ts` | 12 topics × one answer each | `docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt` (FSC §1.1–1.5 + §2.1–2.19) |
+| **Fund Q&A** | `data/fund-qa.json` | `src/screen/fund-qa.ts` | 3 funds × 21 categories | OC fund PDS documents in `docs/fund-data/` |
+
+The dispatcher's `info_process_field` and `info_fund_field` cases call the loaders' typed accessors (`getProcessAnswer`, `getProcessTopicLabel`, `getFundAnswer`, `getFundDisplayName`, `getCategoryLabel`) and run the result through narration templates.
+
+The corresponding right-pane panel renders clickable topic / category buttons that bypass `/api/v1/screen/process` entirely — the click already knows the topic + fund, so it dispatches `{ kind: "info_process_field", topic }` (or `{ kind: "info_fund_field", fundId, category }`) directly, saving a round-trip and an STT bill.
 
 ### Tavus avatar wiring
 
@@ -137,9 +168,15 @@ We tried client-side **Audio Echo** (synthesise audio ourselves and chunk PCM by
 
 ### Narration
 
-`src/screen/narration.ts` is a flat collection of `describeX(...)` template builders, one per intent kind. `describeAppliedFilter` has a compile-time `assertNever` exhaustiveness guard so adding a new `FilterId` without a narration template fails to typecheck.
+`src/screen/narration.ts` is a flat collection of `describeX(...)` template builders, one per intent kind plus a few orientation lines (intro, transitions, gating prompts). `describeAppliedFilter` has a compile-time `assertNever` exhaustiveness guard so adding a new `FilterId` without a narration template fails to typecheck.
 
-The dispatcher in `components/screen/screen-page.tsx` calls these helpers and then `tavusAvatar.echo()`; it captures `screener.error` before/after each `applyFilter` call so it only narrates failure if a *new* error was set, not on dedup early-returns.
+The dispatcher in `components/screen/screen-page.tsx` calls these helpers and feeds them to `narrate()`, which queues each echo through `narrationQueueRef` (a `Promise<void>` chain) so a rapid second narration doesn't interrupt the in-flight one. Each link in the chain waits `INTER_NARRATION_PAUSE_MS` (1500 ms) after Tavus's `stopped_speaking` event before releasing — the WebRTC audio buffer can trail several hundred ms past that event on long lines.
+
+Behavioural rules baked into the dispatcher:
+
+- The final filter's narration is concatenated with `describeFunnelCompletePrompt()` into a single echo, not two — Tavus's `stopped_speaking` was firing before the audio drained on long final-filter lines.
+- `info_stock_field` is **funnel-gated** in screening mode: until all six pending filters have run, it narrates `describeStockFactGatedByFunnel()` instead of opening the stock-fact panel. fund_qa / process_qa modes aren't gated.
+- `applyAndNarrate(filterId)` captures `screener.error` before/after the call so it only narrates failure if a *new* error was set, not on dedup early-returns.
 
 ---
 
@@ -283,17 +320,25 @@ tests/
 ├── screen/   (filters, funnel-state, intent-rules, entity-resolution, market-data-provider, screen-matcher, numeric, routes)
 └── server/   (rate-limit)
 
+data/
+├── asx/                           # Snapshot JSON (universe, ranked-light, top500, curation)
+├── curation.json                  # Curated demo flags for Q5 / Q6 (D4)
+├── fund-qa.json                   # Fund Q&A bank: 3 funds × 21 categories
+├── process-qa.json                # OC investment-process Q&A: 12 topics
+├── reports/                       # Ingest output reports
+└── snapshots/                     # Frozen ingest fixtures
+
 docs/
 ├── ARCHITECTURE.md                # this file
 ├── INFRASTRUCTURE.md              # external services, env, deployment
+├── PROCESSING-STREAMS.md          # concurrent processing streams + activation lifecycles
 ├── TAVUS-PERSONA-SETUP.md         # how to provision the Pep persona
-├── plans/                         # pep-avatar-v2 plan, pitch script, assumptions
+├── plans/                         # pep-avatar-v2 plan, FSC questionnaire source, pitch script
 ├── fund-data/                     # Source PDFs + extracted text
 └── standards/                     # Generic cross-project architecture guides
 
 instrumentation.ts                  # Next.js startup hook → validateEnv()
 next.config.ts                      # Rewrites /api/* → /api/v1/*
-proxy.ts                            # (deleted in phase 7; auth UI no longer redirected)
 ```
 
 ---
@@ -314,4 +359,4 @@ The plan's decision register (`docs/plans/pep-avatar-v2-plan.md` §12) records t
 
 - `bunx tsc --noEmit` — strict TypeScript, no errors.
 - `bun run lint` — ESLint + Next config; a single pre-existing React-Compiler warning in `components/settings/profile-tab.tsx:79` is documented and unrelated.
-- `bun run test` — Vitest. Currently **130/130 green**: 8 screening-engine test files (filters, funnel-state, intent-rules, entity-resolution, market-data-provider, screen-matcher, numeric, routes) plus 1 server test (rate-limit).
+- `bun run test` — Vitest. Currently **181/181 green** across 9 files: 8 screening-engine (filters, funnel-state, intent-rules, entity-resolution, market-data-provider, screen-matcher, numeric, routes) plus 1 server (rate-limit). The intent-rules suite has the bulk — it covers funnel-filter triggers, fund-info routing, process-info routing, generic stock-fact patterns, and several cross-rule precedence checks.

@@ -2,7 +2,9 @@
 
 External services, environment variables, database, and deployment configuration for the **Pep Avatar v2** demo.
 
-**Companion document:** [ARCHITECTURE.md](./ARCHITECTURE.md) — code structure, data flows, layered patterns.
+**Companion documents:**
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — code structure, data flows, layered patterns.
+- [PROCESSING-STREAMS.md](./PROCESSING-STREAMS.md) — every concurrent processing stream and when each is active.
 
 ---
 
@@ -92,6 +94,17 @@ Two Drizzle schema files, bundled by `src/db/index.ts`.
 | `asx_snapshots` | One row per ingested ASX snapshot (date, count, collected_at) | Active snapshot = `MAX(collected_at)`, tiebreak by `id`. |
 | `asx_securities` | One row per security per snapshot | Wide projection: ticker, sector, GICS, mcap, turnover, profitability flags, curated demo flags (`is_unproven_or_complex_tech`, `is_single_commodity_or_single_mine`, `is_asx_100`), full `data_quality` JSON. |
 | `oc_holdings` | Sample portfolio for the Q8 portfolio-overlap intent | Seeded with 10 supplied holdings flagged `is_sample = true`. |
+
+### Static Q&A banks (no DB)
+
+The non-screening modes are backed by version-controlled JSON files, not Postgres rows. Each ships with a typed loader (`src/screen/fund-qa.ts`, `src/screen/process-qa.ts`) that runs a bidirectional drift assertion at module load.
+
+| File | Shape | Source documents |
+|---|---|---|
+| `data/fund-qa.json` | 3 funds × 21 categories of curated answers | OC fund PDS PDFs (extracted in `docs/fund-data/`) |
+| `data/process-qa.json` | 12 topics of curated answers about OC's investment process | `docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt` (FSC §1.1–1.5 + §2.1–2.19) |
+
+Updating an answer means editing the JSON and redeploying — no migration, no ingest. Adding a new fund / category / topic requires a paired edit to the loader's TypeScript union; the module-load assertion fails the dev server immediately if the two drift.
 
 Snapshot ingest is a one-shot script:
 
@@ -212,7 +225,7 @@ bun dev                            # http://localhost:3000
 ```bash
 bun run lint                    # ESLint
 bunx tsc --noEmit               # Strict TypeScript check
-bun run test                    # Vitest (130 cases)
+bun run test                    # Vitest (181 cases across 9 files)
 bun run db:generate             # Generate Drizzle migration from schema diff
 bun run db:push                 # Push schema to Supabase (be careful in prod)
 bun run db:studio               # Drizzle Studio

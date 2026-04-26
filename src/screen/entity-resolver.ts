@@ -5,13 +5,18 @@
  * The class-based loader (below) handles populating that data from the
  * active snapshot via Drizzle, with a small in-memory cache.
  *
- * Two-pass per plan §4c:
- *   1. Ticker token: extract any alphanumeric tokens of length 2–5
- *      (uppercased), keep those that match a known ticker. Single
- *      match → resolve; multiple → ambiguous → null.
- *   2. Company-name fallback: scan the text for distinctive name
- *      tokens (length ≥ 6 to skip common stop-words like "limited"
- *      that appear in many ASX names). Single match → resolve.
+ * Resolution pipeline (each pass requires exactly one ticker hit;
+ * ambiguity → null and we fall through to the next pass):
+ *   1. Ticker token — alphanumeric tokens of length 2–5 (uppercased)
+ *      matched against the snapshot ticker set.
+ *   2. Strict name match — bigram of adjacent ≥4-char name tokens, then
+ *      single-token ≥6-char fallback with word boundaries.
+ *   3. Joined-tokens pass — concatenate adjacent text tokens before
+ *      single-token matching ("common wealth bank" → "commonwealth"
+ *      → CBA). Catches STT splits.
+ *   4. Fuzzy single-token pass — Levenshtein distance ≤ 2 against
+ *      ≥6-char name tokens. Catches typos and mispronunciations
+ *      ("telestra" → TLS, "wesfarmer" → WES).
  *
  * The function never invokes an LLM and never throws on bad input.
  */
@@ -37,6 +42,8 @@ export type ResolvedEntity = {
 const SINGLE_TOKEN_MIN_LEN = 6;
 /** Bigram-eligible token length — looser, since the bigram pair is the discriminator. */
 const BIGRAM_TOKEN_MIN_LEN = 4;
+/** Max edit distance for the fuzzy single-token pass. */
+const FUZZY_MAX_DISTANCE = 2;
 
 const NAME_STOPWORDS = new Set([
   "limited",
@@ -70,6 +77,47 @@ function nameTokens(name: string, minLen: number): string[] {
     .toLowerCase()
     .split(/[\s,.&-]+/)
     .filter((t) => t.length >= minLen && !NAME_STOPWORDS.has(t));
+}
+
+/**
+ * Lowercased alphanumeric tokens from arbitrary input text. Used by
+ * the joined-tokens and fuzzy passes so they share the same notion of
+ * "what counts as a word" — `\W+` split on the lowercase form.
+ */
+function textTokens(text: string, minLen: number): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= minLen);
+}
+
+/**
+ * Bounded Levenshtein with early termination. Returns the distance
+ * if it's ≤ `max`, otherwise `max + 1`. Two-row DP, O(min(|a|,|b|)).
+ *
+ * The early bound (`Math.min(...row) > max`) is what keeps this cheap
+ * — most candidate pairs fail the length-difference filter or bail
+ * out partway through.
+ */
+function levenshtein(a: string, b: string, max: number): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  let curr = new Array(b.length + 1);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[b.length];
 }
 
 /**
@@ -116,8 +164,70 @@ function namePass(text: string, nameByTicker: Map<string, string>): string | nul
 }
 
 /**
+ * Joined-tokens pass — concatenates each consecutive pair of text
+ * tokens and tries them as exact single-token matches. Catches STT
+ * splits like "common wealth" → "commonwealth" → CBA, or
+ * "next dc" → "nextdc" → NXT.
+ */
+function joinedTokenPass(text: string, nameByTicker: Map<string, string>): string | null {
+  const toks = textTokens(text, 1);
+  if (toks.length < 2) return null;
+  const joined: string[] = [];
+  for (let i = 0; i < toks.length - 1; i++) {
+    const j = toks[i] + toks[i + 1];
+    if (j.length >= SINGLE_TOKEN_MIN_LEN) joined.push(j);
+  }
+  if (joined.length === 0) return null;
+  const joinedSet = new Set(joined);
+  const hits = new Set<string>();
+  for (const [ticker, name] of nameByTicker) {
+    const tokens = nameTokens(name, SINGLE_TOKEN_MIN_LEN);
+    for (const t of tokens) {
+      if (joinedSet.has(t)) {
+        hits.add(ticker);
+        break;
+      }
+    }
+  }
+  return hits.size === 1 ? Array.from(hits)[0] : null;
+}
+
+/**
+ * Fuzzy single-token pass — for each ≥6-char name token, checks whether
+ * any ≥6-char text token is within Levenshtein distance ≤ 2. Catches
+ * typos and mispronunciations: "telestra" → TLS, "wesfarmer" → WES,
+ * "westpack" → WBC.
+ *
+ * Length-difference pre-filter and bounded Levenshtein keep the cost
+ * down — pathological case is O(|tickers| * |textTokens| * 6 * max),
+ * which for ~2000 ASX names + a 5-word utterance is well under 1 ms.
+ */
+function fuzzyTokenPass(text: string, nameByTicker: Map<string, string>): string | null {
+  const candidates = textTokens(text, SINGLE_TOKEN_MIN_LEN);
+  if (candidates.length === 0) return null;
+  const hits = new Set<string>();
+  for (const [ticker, name] of nameByTicker) {
+    const nameToks = nameTokens(name, SINGLE_TOKEN_MIN_LEN);
+    let matched = false;
+    for (const nt of nameToks) {
+      for (const ct of candidates) {
+        if (Math.abs(nt.length - ct.length) > FUZZY_MAX_DISTANCE) continue;
+        if (levenshtein(nt, ct, FUZZY_MAX_DISTANCE) <= FUZZY_MAX_DISTANCE) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) break;
+    }
+    if (matched) hits.add(ticker);
+  }
+  return hits.size === 1 ? Array.from(hits)[0] : null;
+}
+
+/**
  * Resolve an utterance to a `{ ticker, companyName }` pair from the
- * supplied data. Returns null when no unique match is found.
+ * supplied data. Returns null when no unique match is found across
+ * all four passes (ticker, strict name, joined-tokens, fuzzy).
  *
  * Pure — same input always produces the same output.
  */
@@ -132,6 +242,16 @@ export function resolveEntity(text: string, data: EntityData): ResolvedEntity | 
   const nameHit = namePass(text, data.nameByTicker);
   if (nameHit) {
     return { ticker: nameHit, companyName: data.nameByTicker.get(nameHit) ?? nameHit };
+  }
+
+  const joinedHit = joinedTokenPass(text, data.nameByTicker);
+  if (joinedHit) {
+    return { ticker: joinedHit, companyName: data.nameByTicker.get(joinedHit) ?? joinedHit };
+  }
+
+  const fuzzyHit = fuzzyTokenPass(text, data.nameByTicker);
+  if (fuzzyHit) {
+    return { ticker: fuzzyHit, companyName: data.nameByTicker.get(fuzzyHit) ?? fuzzyHit };
   }
 
   return null;

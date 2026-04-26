@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { resolveEntity } from "@/src/screen/entity-resolver";
 
 const TEST_DATA = {
-  tickers: new Set(["BHP", "CBA", "RIO", "MIN", "NXT", "ASX", "A2M"]),
+  tickers: new Set(["BHP", "CBA", "RIO", "MIN", "NXT", "ASX", "A2M", "WBC", "WES", "TLS"]),
   nameByTicker: new Map([
     ["BHP", "BHP GROUP LIMITED"],
     ["CBA", "COMMONWEALTH BANK OF AUSTRALIA"],
@@ -17,6 +17,9 @@ const TEST_DATA = {
     ["NXT", "NEXTDC LIMITED"],
     ["ASX", "ASX LIMITED"],
     ["A2M", "THE A2 MILK COMPANY LIMITED"],
+    ["WBC", "WESTPAC BANKING CORPORATION"],
+    ["WES", "WESFARMERS LIMITED"],
+    ["TLS", "TELSTRA GROUP LIMITED"],
   ]),
 };
 
@@ -74,6 +77,44 @@ describe("resolveEntity — company-name fallback", () => {
     // every company name). The ticker should win.
     const r = resolveEntity("BHP Limited", TEST_DATA);
     expect(r?.ticker).toBe("BHP");
+  });
+});
+
+describe("resolveEntity — joined-tokens fallback (STT word splits)", () => {
+  it("matches 'common wealth' as 'commonwealth' → CBA", () => {
+    expect(resolveEntity("tell me about common wealth bank", TEST_DATA)?.ticker).toBe("CBA");
+  });
+
+  it("matches 'next dc' as 'nextdc' → NXT", () => {
+    expect(resolveEntity("what's the price of next dc", TEST_DATA)?.ticker).toBe("NXT");
+  });
+
+  it("matches 'wes farmers' as 'wesfarmers' → WES", () => {
+    expect(resolveEntity("tell me about wes farmers", TEST_DATA)?.ticker).toBe("WES");
+  });
+});
+
+describe("resolveEntity — fuzzy single-token (typos / mispronunciations)", () => {
+  it("matches 'westpack' (typo) → WBC", () => {
+    expect(resolveEntity("tell me about westpack", TEST_DATA)?.ticker).toBe("WBC");
+  });
+
+  it("matches 'telestra' (mispronunciation) → TLS", () => {
+    expect(resolveEntity("tell me about telestra", TEST_DATA)?.ticker).toBe("TLS");
+  });
+
+  it("matches 'wesfarmer' (missing trailing s) → WES", () => {
+    expect(resolveEntity("how is wesfarmer doing", TEST_DATA)?.ticker).toBe("WES");
+  });
+
+  it("matches 'commonwelth' (single-letter drop) → CBA", () => {
+    expect(resolveEntity("commonwelth bank price", TEST_DATA)?.ticker).toBe("CBA");
+  });
+
+  it("returns null when the typo is too far (>2 edits)", () => {
+    // 'westxpyz' differs from 'westpac' by 4 edits — beyond the
+    // FUZZY_MAX_DISTANCE = 2 threshold.
+    expect(resolveEntity("tell me about westxpyz", TEST_DATA)).toBeNull();
   });
 });
 

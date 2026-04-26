@@ -266,6 +266,16 @@ const POST_FUND_INFO_RULES: Rule[] = [
     build: () => ({ kind: "info_stock_field", field: "earnings_status" }),
   },
 
+  // Generic stock lookup — "tell me about X", "info on X", "what about
+  // X". No `field` so the dispatcher renders the full snapshot panel.
+  // Sits AFTER the field-specific rules so e.g. "tell me about BHP's
+  // market cap" routes to market_cap, not the generic panel. Unresolved
+  // names fall through to describeStockFactUnresolved().
+  {
+    pattern: /\b(?:tell\s+me\s+(?:more\s+)?about|info\s+(?:on|about)|details?\s+(?:on|about|of)|what\s+about)\b/,
+    build: () => ({ kind: "info_stock_field" }),
+  },
+
   // ─── Output prefs (catch-all) ───────────────────────────────────
   {
     pattern: /\bemail\b.*\b(?:list|stocks?|results?|me|it)\b/,

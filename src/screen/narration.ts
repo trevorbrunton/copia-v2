@@ -95,7 +95,7 @@ export function describeStockFactRequest(ticker: string, field: string | undefin
 
 /** Narration for `info_stock_field` with an unresolved ticker. */
 export function describeStockFactUnresolved(): string {
-  return `I couldn't pin down which company you meant. Try a ticker like BHP or a more specific company name.`;
+  return `I'm not sure which stock that is — please tell me the ticker code of that stock.`;
 }
 
 /** Narration for Q8 portfolio overlap with results. */

@@ -64,6 +64,18 @@ const cases: Array<{ utterance: string; expectKind: string; expectFilter?: strin
   { utterance: "How much is BHP trading at?", expectKind: "info_stock_field", expectField: "share_price" },
   { utterance: "Is CBA profitable?", expectKind: "info_stock_field", expectField: "earnings_status" },
   { utterance: "What are BHP's earnings?", expectKind: "info_stock_field", expectField: "earnings_status" },
+
+  // ─── Generic stock lookup (no field; entity-resolver fills ticker) ─
+  // The rule fires regardless of whether the name resolves — the
+  // /process route runs the entity resolver after classification, and
+  // the dispatcher falls back to describeStockFactUnresolved() when the
+  // ticker stays undefined.
+  { utterance: "Tell me about National Bank", expectKind: "info_stock_field" },
+  { utterance: "Tell me about BHP", expectKind: "info_stock_field" },
+  { utterance: "What about CBA", expectKind: "info_stock_field" },
+  { utterance: "Info on RIO", expectKind: "info_stock_field" },
+  { utterance: "Details about Westpac", expectKind: "info_stock_field" },
+  { utterance: "Tell me more about Mineral Resources", expectKind: "info_stock_field" },
 ];
 
 interface FundCase {
@@ -111,10 +123,26 @@ describe("matchIntentRule", () => {
   }
 
   it("returns null for utterances with no rule match (classifier fallback path)", () => {
-    expect(matchIntentRule("Tell me about the weather")).toBeNull();
     expect(matchIntentRule("What time is it?")).toBeNull();
     expect(matchIntentRule("")).toBeNull();
     expect(matchIntentRule("    ")).toBeNull();
+  });
+
+  it("specific stock-fact field rules win over the generic 'tell me about' lookup", () => {
+    // "tell me about BHP's market cap" should resolve to market_cap, not
+    // the generic info_stock_field with no field — the field-specific
+    // patterns sit before the generic lookup in POST_FUND_INFO_RULES.
+    const intent = matchIntentRule("tell me about BHP's market cap");
+    expect(intent?.kind).toBe("info_stock_field");
+    expect((intent as { field?: string }).field).toBe("market_cap");
+  });
+
+  it("fund-info still wins over the generic stock lookup when a fund is named", () => {
+    // "Tell me about the OC mid-cap fund" must route to info_fund_field,
+    // not info_stock_field — matchFundInfoRule runs before the generic
+    // lookup pattern.
+    const intent = matchIntentRule("Tell me about the OC mid-cap fund");
+    expect(intent?.kind).toBe("info_fund_field");
   });
 
   it("is case-insensitive", () => {

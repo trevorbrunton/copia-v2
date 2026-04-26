@@ -53,7 +53,7 @@ describe("matchScreenIntent — composition", () => {
 
   it("returns fallback when the classifier throws", async () => {
     const intent = await matchScreenIntent(
-      "tell me about the weather over there",
+      "what time does the market open",
       throwingClassifier
     );
     expect(intent.kind).toBe("fallback");

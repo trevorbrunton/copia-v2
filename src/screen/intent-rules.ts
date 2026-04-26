@@ -373,22 +373,18 @@ const POST_FUND_INFO_RULES: Rule[] = [
     build: () => ({ kind: "info_stock_field", field: "earnings_status" }),
   },
 
-  // Generic stock lookup — "tell me about X", "info on X", "what about
-  // X". No `field` so the dispatcher renders the full snapshot panel.
-  // Sits AFTER the field-specific rules so e.g. "tell me about BHP's
-  // market cap" routes to market_cap, not the generic panel. Unresolved
-  // names fall through to describeStockFactUnresolved().
-  {
-    pattern: /\b(?:tell\s+me\s+(?:more\s+)?about|info\s+(?:on|about)|details?\s+(?:on|about|of)|what\s+about)\b/,
-    build: () => ({ kind: "info_stock_field" }),
-  },
-
-  // ─── Output prefs (catch-all) ───────────────────────────────────
+  // ─── Output prefs ───────────────────────────────────────────────
   // Pep's funnel-complete prompt offers "say the word" for email — so
   // the broader bare-email phrasings ("email please", "email me",
   // even just "email") are intentionally caught here.
+  //
+  // These sit BEFORE the generic stock lookup ("details of X") because
+  // utterances like "email me the details of the list" otherwise get
+  // hijacked by the `details? of` clause and routed to info_stock_field.
+  // Workflow actions (email/show) are more specific than the catch-all
+  // browse pattern, so they should win when both could match.
   {
-    pattern: /\bemail\b.*\b(?:list|stocks?|results?|me|it)\b/,
+    pattern: /\bemail\b.*\b(?:list|stocks?|results?|me|it|details?)\b/,
     build: () => ({ kind: "output_email" }),
   },
   {
@@ -396,7 +392,7 @@ const POST_FUND_INFO_RULES: Rule[] = [
     build: () => ({ kind: "output_email" }),
   },
   {
-    pattern: /\bsend\s+me\b.*\b(?:list|stocks?|results?|the\s+list)\b/,
+    pattern: /\bsend\s+me\b.*\b(?:list|stocks?|results?|the\s+list|details?)\b/,
     build: () => ({ kind: "output_email" }),
   },
   {
@@ -413,6 +409,18 @@ const POST_FUND_INFO_RULES: Rule[] = [
   {
     pattern: /^(?:just\s+)?show\s+me\b[\s.!?]*$/,
     build: () => ({ kind: "output_show" }),
+  },
+
+  // Generic stock lookup — "tell me about X", "info on X", "what about
+  // X". No `field` so the dispatcher renders the full snapshot panel.
+  // Sits AFTER the field-specific stock-fact rules AND the output-pref
+  // workflow rules above, so e.g. "tell me about BHP's market cap"
+  // routes to market_cap and "email me the details of the list"
+  // routes to output_email rather than info_stock_field. Unresolved
+  // names fall through to describeStockFactUnresolved().
+  {
+    pattern: /\b(?:tell\s+me\s+(?:more\s+)?about|info\s+(?:on|about)|details?\s+(?:on|about|of)|what\s+about)\b/,
+    build: () => ({ kind: "info_stock_field" }),
   },
 ];
 

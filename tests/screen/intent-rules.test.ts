@@ -29,6 +29,11 @@ const cases: Array<{ utterance: string; expectKind: string; expectFilter?: strin
   { utterance: "Email please", expectKind: "output_email" },
   { utterance: "email", expectKind: "output_email" },
   { utterance: "Send me an email", expectKind: "output_email" },
+  // Email phrasings that include "details of the list" — must beat the
+  // generic stock-lookup pattern that also matches "details of".
+  { utterance: "Email me the details of the list", expectKind: "output_email" },
+  { utterance: "Send me the details of the list", expectKind: "output_email" },
+  { utterance: "Email me the details", expectKind: "output_email" },
 
   // ─── Daily monitoring (Q7) ─────────────────────────────
   { utterance: "Send me a daily email on changes to this screen", expectKind: "monitoring_enable_daily" },

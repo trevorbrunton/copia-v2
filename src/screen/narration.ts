@@ -28,28 +28,28 @@ export function describeAppliedFilter(filterId: FilterId, count: number, prevCou
   switch (filterId) {
     case "q1_mcap_50m":
     case "m1_mcap_50m":
-      return `${c} stocks on the ASX have a market cap above $50 million.`;
+      return `This filter is based on market capitalisation. We set a threshold of greater than fifty million dollars — small enough to capture mid- and small-caps, large enough to exclude the illiquid micro-cap end. ${c} stocks meet the criterion.`;
     case "q2_top_100":
-      return `Here are the top ${c} by market cap.`;
+      return `This filter narrows the universe to the top one hundred companies by market cap — a starting cut for this walk-through that focuses on the largest names. ${c} stocks remain.`;
     case "q3_turnover_20":
     case "m6_sufficient_liquidity":
-      return `${c} of those have an annual turnover ratio of 20% or more.`;
+      return `This filter screens for sufficient liquidity. We use an annual turnover ratio of at least twenty percent as the proxy — it ensures positions can be entered and exited at sensible prices without moving the market. ${c} stocks meet that bar.`;
     case "q4_profitable":
     case "m2_profitable":
-      return `${c} are profitable on a TTM basis.`;
+      return `This filter screens for profitability. We exclude any stock that isn't profitable on a trailing-twelve-month basis — OC don't invest in loss-makers, and this discipline weeds out speculative names that haven't proven their business model. ${c} profitable stocks remain.`;
     case "m3_cashflow_positive":
-      return `${c} are also free-cash-flow positive on a TTM basis.`;
+      return `This filter adds the cash-flow test. We also require positive free cash flow on a trailing-twelve-month basis — profit on paper isn't enough, the business must be generating real cash. ${c} stocks remain.`;
     case "q5_unproven_tech":
     case "m4_exclude_unproven_tech":
       // Pep's subsumption framing per D7 / §17.
       return prevCount === count
-        ? `Every stock with unproven or complex technology in this snapshot has already been excluded by the profitability filter — that's a curated demo flag, not an automatic classification. ${c} stocks remain.`
-        : `${c} stocks remain after excluding unproven / complex tech — based on a curated demo flag.`;
+        ? `This filter would normally exclude companies with unproven or complex technologies — businesses where the model isn't proven or future cash flows are too speculative to value. In this snapshot, every such stock has already been removed by the profitability filter — that's a curated demo flag, not an automatic classification. ${c} stocks remain.`
+        : `This filter excludes companies with unproven or complex technologies — businesses where the model isn't proven or future cash flows are too speculative to value. Based on a curated demo flag. ${c} stocks remain.`;
     case "q6_single_commodity":
     case "m5_exclude_single_commodity":
-      return `${c} stocks remain after excluding single-commodity / single-mine names — based on a curated reference list.`;
+      return `This filter excludes single-commodity and single-mine resource stocks. They tend to have significant earnings volatility because they're exposed to one commodity cycle — OC's discipline avoids that concentrated risk. Based on a curated reference list. ${c} stocks remain.`;
     case "m7_exclude_asx_100":
-      return `${c} stocks remain after excluding the ASX 100 names. This is the OC initial screen.`;
+      return `The final cut: we exclude the ASX 100 names. OC is a small and mid-cap manager — the top one hundred isn't their hunting ground. What's left is the OC initial screen — ${c} stocks form the investable universe for the OC Premium Small Companies Fund.`;
     default:
       return assertNever(filterId);
   }

@@ -280,13 +280,13 @@ export function ScreenPage() {
       const errBefore = screener.error;
       const stage = await screener.applyFilter(filterId);
       if (stage) {
-        narrate(describeAppliedFilter(filterId, stage.count, prevCount));
-        // If this was the final filter in the active preset's sequence,
-        // queue the follow-up prompt — narrate() chains it so it plays
-        // after the filter result + inter-narration pause.
-        if (filterId === sequence[sequence.length - 1]) {
-          narrate(describeFunnelCompletePrompt());
-        }
+        const outcome = describeAppliedFilter(filterId, stage.count, prevCount);
+        // Final filter in the active preset's sequence: append the
+        // follow-up prompt onto the same echo. A single utterance avoids
+        // Tavus cutting the prompt off mid-sentence — see
+        // describeFunnelCompletePrompt for the rationale.
+        const isFinal = filterId === sequence[sequence.length - 1];
+        narrate(isFinal ? `${outcome} ${describeFunnelCompletePrompt()}` : outcome);
         return true;
       }
       const errAfter = screener.error;

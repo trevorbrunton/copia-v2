@@ -61,11 +61,13 @@ export function describeAppliedFilterFailure(filterId: FilterId, error: string):
 }
 
 /**
- * Follow-up prompt narrated after the LAST filter in either preset
- * has applied. Invites the user to drill into the remaining stocks.
- * Fires through the same narrate() queue so it lands after the
- * inter-narration pause — Pep gets a beat between announcing the
- * final count and asking the follow-up.
+ * Follow-up prompt appended to the LAST filter's narration. Invites the
+ * user to drill into the remaining stocks. Concatenated into the same
+ * echo as the filter outcome (rather than queued as a separate narrate)
+ * because Tavus's stopped_speaking event can fire before the client
+ * audio buffer fully drains on long final-filter lines, cutting the
+ * follow-up in mid-sentence. A single echo with a sentence break gives
+ * ElevenLabs natural prosody for the beat without the cut-off risk.
  */
 export function describeFunnelCompletePrompt(): string {
   return `Now would you like some further details of these remaining stocks? Just ask me, or click on the stocks.`;

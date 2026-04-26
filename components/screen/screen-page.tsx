@@ -31,7 +31,6 @@ import {
   describeInitialScreenStart,
   describeMethodologyIntro,
   describeMonitoringEnabled,
-  describeOpening,
   describeOutputEmail,
   describeOutputShow,
   describePortfolioOverlap,
@@ -57,6 +56,16 @@ type Preset = "questionnaire" | "methodology";
 type Mode = "screening" | "fund_qa";
 
 const FUNDS = listFunds();
+
+/**
+ * Pause after each narrate() echo before releasing the queue for the
+ * next call. Tavus's `stopped_speaking` event fires when the server
+ * stops streaming audio, but the client-side buffer can still have a
+ * few hundred ms of audio trailing — the pause lets it drain so the
+ * next echo doesn't interrupt the tail of the current one. Also gives
+ * the audience a natural beat between thoughts.
+ */
+const INTER_NARRATION_PAUSE_MS = 750;
 
 // Single configured Pep persona — must be `pipeline_mode: "echo"` per
 // docs/TAVUS-PERSONA-SETUP.md. Read once at module load; surfaced as a
@@ -122,38 +131,11 @@ export function ScreenPage() {
       tavusAvatar.status === "ready" || tavusAvatar.status === "speaking";
   }, [tavusAvatar.status]);
 
-  // One-shot opener: spoken when both the avatar reaches `ready` AND
-  // the snapshot has loaded, so the audience hears the cloned voice
-  // and a hint of what to ask. Guarded by a ref so an avatar reconnect
-  // mid-session doesn't replay the greeting.
-  //
-  // Pulling the fields off `tavusAvatar` into local consts gives the
-  // exhaustive-deps lint specific identifiers to track — depending on
-  // the whole `tavusAvatar` object would re-run the effect on every
-  // render (the hook returns a fresh object reference each time).
-  //
-  // The `queueMicrotask` wrap defers the state-touching work past the
-  // effect's synchronous body so it doesn't trip React 19's
-  // `react-hooks/set-state-in-effect` lint rule. The transition from
-  // status:loading → status:ready is event-driven; the state update is
-  // a legitimate response to that transition. The microtask is a small
-  // accommodation, not architectural debt.
-  const openingSpokenRef = useRef(false);
+  // The session greeting now lives at the start of the per-preset
+  // intro narration (describeQuestionnaireIntro / describeMethodologyIntro
+  // both open with "Hi, I'm Pep…"). One greeting + one philosophy line
+  // = one echo, no risk of the second cutting off the first.
   const tavusStatus = tavusAvatar.status;
-  const tavusEcho = tavusAvatar.echo;
-  useEffect(() => {
-    if (openingSpokenRef.current) return;
-    if (tavusStatus !== "ready") return;
-    if (!screener.snapshot) return;
-    openingSpokenRef.current = true;
-    queueMicrotask(() => {
-      const greeting = describeOpening();
-      appendTranscript("assistant", greeting);
-      tavusEcho(greeting).catch((err) => {
-        console.warn("[screen] tavus opening echo failed:", err);
-      });
-    });
-  }, [tavusStatus, tavusEcho, screener.snapshot, appendTranscript]);
 
   /**
    * Append an assistant line to the transcript AND have Pep speak it
@@ -168,20 +150,31 @@ export function ScreenPage() {
    * resolver and triggering a mid-sentence cut. The queue keeps the
    * audio contiguous.
    *
+   * After each echo we wait `INTER_NARRATION_PAUSE_MS` before
+   * releasing the queue. Tavus's `stopped_speaking` event fires when
+   * the server stops streaming audio, but the client-side buffer can
+   * still have a few hundred ms of audio trailing. The pause lets
+   * that drain so the next narration doesn't trample the tail of the
+   * current one. It also gives the audience a beat between thoughts.
+   *
    * Returns the promise that resolves when this specific narration
-   * finishes speaking, so callers that want to chain (or just await
-   * for sequencing) can. Existing fire-and-forget callers ignore it.
+   * finishes (including the trailing pause), so callers that want to
+   * chain can. Existing fire-and-forget callers ignore it.
    */
   const narrationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const narrate = useCallback(
     (text: string): Promise<void> => {
       appendTranscript("assistant", text);
       if (!tavusReadyRef.current) return Promise.resolve();
-      const next = narrationQueueRef.current.then(() =>
-        tavusAvatar.echo(text).catch((err) => {
-          console.warn("[screen] tavus echo failed:", err);
-        })
-      );
+      const next = narrationQueueRef.current
+        .then(() =>
+          tavusAvatar.echo(text).catch((err) => {
+            console.warn("[screen] tavus echo failed:", err);
+          })
+        )
+        .then(
+          () => new Promise<void>((r) => setTimeout(r, INTER_NARRATION_PAUSE_MS))
+        );
       narrationQueueRef.current = next;
       return next;
     },

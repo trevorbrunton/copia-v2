@@ -370,6 +370,8 @@ export function ScreenPage() {
             narrate(describeStockFactUnresolved());
           }
           break;
+        // NOTE: row clicks in the StocksTable go through `selectStock`
+        // (defined below) which applies the same funnel-complete gate.
         case "info_portfolio_overlap": {
           const current = screener.stages.at(-1);
           if (!current) {
@@ -484,6 +486,25 @@ export function ScreenPage() {
       }
     },
     [isThinking, appendTranscript, handleIntent]
+  );
+
+  /**
+   * Open the stock-fact panel for `ticker`, but only if every funnel
+   * filter has been applied. Used by both the StocksTable row click
+   * and (via the dispatcher) the `info_stock_field` intent. Funnel
+   * order is irrelevant — `pending` is the canonical sequence minus
+   * `completedStageIds`, so out-of-order applications still empty
+   * `pending` once all six filters have run.
+   */
+  const selectStock = useCallback(
+    (ticker: string) => {
+      if (mode === "screening" && pending.length > 0) {
+        narrate(describeStockFactGatedByFunnel());
+        return;
+      }
+      setSelectedTicker(ticker);
+    },
+    [mode, pending, narrate]
   );
 
   /**
@@ -846,7 +867,7 @@ export function ScreenPage() {
                 {mode === "screening" ? (
                   <StocksTable
                     rows={screener.currentRows}
-                    onTickerClick={setSelectedTicker}
+                    onTickerClick={selectStock}
                     selectedTicker={selectedTicker}
                     className="flex-1 min-h-0 flex flex-col"
                   />

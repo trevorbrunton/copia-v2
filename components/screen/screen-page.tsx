@@ -664,7 +664,7 @@ export function ScreenPage() {
               <div className="flex items-center justify-between text-xs text-white/60">
                 <span className="font-medium">Mode</span>
                 <div className="flex gap-1 rounded-md bg-white/5 p-0.5">
-                  {(["screening", "fund_qa", "process_qa"] as Mode[]).map((m) => (
+                  {(["screening", "process_qa", "fund_qa"] as Mode[]).map((m) => (
                     <button
                       key={m}
                       type="button"

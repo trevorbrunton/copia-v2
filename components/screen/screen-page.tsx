@@ -28,7 +28,6 @@ import {
   describeFundFactMissingCategory,
   describeFundFactMissingFund,
   describeFunnelComplete,
-  describeInitialScreenStart,
   describeMethodologyIntro,
   describeMethodologyTransition,
   describeMonitoringEnabled,
@@ -293,29 +292,21 @@ export function ScreenPage() {
     [screener, narrate]
   );
 
-  /** Run the full methodology preset, resetting first for a clean rail. */
-  const runInitialScreen = useCallback(async () => {
-    if (screener.stages.length > 1) screener.reset();
-    for (const f of METHODOLOGY_FILTERS) {
-      const ok = await applyAndNarrate(f);
-      if (!ok) break;
-    }
-  }, [screener, applyAndNarrate]);
-
   /**
    * Preset toggle handler with two paths:
    *
    * - **First-time selection** (no funnel progress yet) → narrate the
    *   full preset intro so the audience hears the philosophy framing.
+   *   User then clicks Next → for each filter.
    * - **Mid-session switch** (funnel has run filters) → reset the
-   *   funnel, narrate a brief transition cue, and (for methodology
-   *   only) auto-run the full screen end-to-end so the audience can
-   *   compare. The questionnaire's value is the step-by-step walk-
-   *   through, so it's not auto-run on switch.
+   *   funnel, narrate a brief transition cue, and let the user click
+   *   Next → through the new preset's filters. Both presets are
+   *   step-by-step — the audience sees each filter's effect.
    *
-   * Mark intro as "spoken" for the new preset so the auto-fire effect
-   * doesn't re-trigger the full philosophy intro on top of the
-   * brief transition.
+   * Mark intro AND universe as "spoken" for the new preset on
+   * mid-session switch so the auto-fire effects stay silent and the
+   * rail correctly shows them as already-completed (the brief
+   * transition narration substitutes for them).
    */
   const switchPreset = useCallback(
     (newPreset: Preset) => {
@@ -324,29 +315,27 @@ export function ScreenPage() {
       setPreset(newPreset);
 
       if (!hasProgress) {
-        narrateIntroFor(newPreset);
+        void narrateIntroFor(newPreset);
         return;
       }
 
-      // Mid-session switch: reset, mark intro/universe as already
-      // resolved so the auto-fire effects stay silent and the rail
-      // shows them as completed (the transition narration substitutes
-      // for them). Then narrate the brief transition (and auto-run
-      // for methodology).
+      // Mid-session switch: reset, mark intro/universe done sync so
+      // the auto-fire effects stay silent, then narrate the brief
+      // transition. User clicks Next → through the new preset's
+      // filters from there.
       screener.reset();
       introQueuedForPresetRef.current = newPreset;
       setIntroSpokenForPreset(newPreset);
       universeQueuedRef.current = true;
       setUniverseSpoken(true);
 
-      if (newPreset === "methodology") {
-        narrate(describeMethodologyTransition());
-        void runInitialScreen();
-      } else {
-        narrate(describeQuestionnaireTransition());
-      }
+      narrate(
+        newPreset === "methodology"
+          ? describeMethodologyTransition()
+          : describeQuestionnaireTransition()
+      );
     },
-    [preset, screener, narrate, narrateIntroFor, runInitialScreen]
+    [preset, screener, narrate, narrateIntroFor]
   );
 
   const handleIntent = useCallback(
@@ -363,10 +352,11 @@ export function ScreenPage() {
           await applyAndNarrate(intent.filterId);
           break;
         case "apply_initial_screen":
-          if (preset !== "methodology") setPreset("methodology");
-          narrateIntroFor("methodology");
-          narrate(describeInitialScreenStart());
-          await runInitialScreen();
+          // Switch to methodology and let the user step through it.
+          // First-time path narrates the full intro; mid-session path
+          // narrates the brief transition. Either way, no auto-run —
+          // the user clicks Next → for each filter.
+          switchPreset("methodology");
           break;
         case "output_show": {
           const current = screener.stages.at(-1);
@@ -474,11 +464,9 @@ export function ScreenPage() {
     [
       screener,
       nextFilter,
-      preset,
-      runInitialScreen,
       narrate,
-      narrateIntroFor,
       applyAndNarrate,
+      switchPreset,
       mode,
       activeFund,
     ]

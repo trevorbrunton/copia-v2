@@ -109,11 +109,6 @@ export function describeFallback(): string {
   return `I can't answer that in this demo. Try asking about a filter, a stock's price or market cap, or running the OC initial screen.`;
 }
 
-/** Narration for `apply_initial_screen` (announces the run). */
-export function describeInitialScreenStart(): string {
-  return `Running the OC initial screen — applying market cap above $50m, profitable, cash-flow positive, the curated exclusions, liquidity, and the ASX 100 cut.`;
-}
-
 /**
  * Narration for the starting universe stage — the unfiltered ASX
  * universe that the funnel begins from. Fires after the intro so the
@@ -142,7 +137,7 @@ export function describeQuestionnaireIntro(): string {
  * opener fires before this).
  */
 export function describeMethodologyIntro(): string {
-  return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC's investable universe is defined by an initial screen that removes companies they consider unsuitable — too small, not profitable or cash-flow positive, single-commodity miners, complex or unproven technology, illiquid names, and the ASX 100 since OC is a small-cap manager. What's left is the starting point for the OC Premium Small Companies Fund. I'll run that full screen end-to-end now.`;
+  return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC's investable universe is defined by an initial screen that removes companies they consider unsuitable — too small, not profitable or cash-flow positive, single-commodity miners, complex or unproven technology, illiquid names, and the ASX 100 since OC is a small-cap manager. What's left is the starting point for the OC Premium Small Companies Fund. I'll walk you through that screen step by step — click Next to move through each filter.`;
 }
 
 /**

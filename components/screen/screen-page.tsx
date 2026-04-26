@@ -79,12 +79,20 @@ export function ScreenPage() {
   const tavusAvatar = useTavusAvatar();
 
   const [preset, setPreset] = useState<Preset>("questionnaire");
-  // Tracks which preset's introduction has already been spoken this
-  // session. Reset on funnel reset. Lets the intro be a real "step 1"
-  // in the rail without firing twice if the user toggles back-and-
-  // forth between presets.
+  // Tracks which preset's introduction has already finished SPEAKING
+  // this session — drives the rail's Introduction step (checked vs
+  // pending). Set AFTER the narrate() promise resolves so the visual
+  // doesn't flip before Pep finishes the line.
+  // The auto-fire effect uses `introQueuedForPresetRef` (synchronous)
+  // to avoid double-firing while the audio is in flight.
   const [introSpokenForPreset, setIntroSpokenForPreset] =
     useState<Preset | null>(null);
+  const introQueuedForPresetRef = useRef<Preset | null>(null);
+  // Same split for universe — `universeSpoken` drives the rail; the
+  // ref guards against the auto-fire effect re-queuing during the
+  // window between queue + audio-finish.
+  const [universeSpoken, setUniverseSpoken] = useState(false);
+  const universeQueuedRef = useRef(false);
   const [mode, setMode] = useState<Mode>("screening");
   const [activeFund, setActiveFund] = useState<FundId>("mid_cap");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
@@ -191,51 +199,61 @@ export function ScreenPage() {
    * the funnel rail.
    */
   const narrateIntroFor = useCallback(
-    (p: Preset) => {
+    async (p: Preset): Promise<void> => {
+      // Synchronous queue guard — keeps a re-rendered effect from
+      // dispatching a second echo while the first is still in flight.
+      if (introQueuedForPresetRef.current === p) return;
       if (introSpokenForPreset === p) return;
-      setIntroSpokenForPreset(p);
-      narrate(
+      introQueuedForPresetRef.current = p;
+      await narrate(
         p === "methodology"
           ? describeMethodologyIntro()
           : describeQuestionnaireIntro()
       );
+      // Audio (plus inter-narration pause) has fully completed —
+      // flip the rail's Introduction step to checked.
+      setIntroSpokenForPreset(p);
     },
     [introSpokenForPreset, narrate]
   );
 
   // Auto-fire the intro once the avatar is ready AND the snapshot has
-  // loaded AND the user is in screening mode. Mirrors the opener's
-  // pattern but gates on `introSpokenForPreset` so toggling presets
-  // back-and-forth doesn't re-narrate. The preset-toggle handler also
-  // calls narrateIntroFor explicitly when switching mid-session.
+  // loaded AND the user is in screening mode. The synchronous
+  // `introQueuedForPresetRef` guard prevents a re-rendered effect
+  // from dispatching a duplicate echo while the first is still in
+  // flight; the state guard catches the case where audio has
+  // finished and visual is updated.
   useEffect(() => {
     if (!isStarted) return;
     if (tavusStatus !== "ready") return;
     if (mode !== "screening") return;
+    if (introQueuedForPresetRef.current === preset) return;
     if (introSpokenForPreset === preset) return;
-    queueMicrotask(() => narrateIntroFor(preset));
+    queueMicrotask(() => {
+      void narrateIntroFor(preset);
+    });
   }, [isStarted, tavusStatus, mode, preset, introSpokenForPreset, narrateIntroFor]);
 
-  // Universe narration: fires once per session, after the intro is
-  // spoken for the active preset. Tavus persona-side TTS queues
-  // echoes server-side so the universe line follows the intro
-  // sequentially rather than overlapping. The ref guard mirrors the
-  // openingSpokenRef pattern — synchronous (so a re-rendered effect
-  // doesn't queue a duplicate microtask) and not subject to the
-  // React 19 set-state-in-effect lint rule. Reset on funnel reset
-  // mutates the ref directly from the click handler.
-  const universeNarratedRef = useRef(false);
+  // Universe narration fires once after the intro audio for the
+  // active preset has fully completed. Synchronous queued ref
+  // prevents duplicate dispatch; `universeSpoken` state flips after
+  // the narrate() promise resolves so the rail's Universe step
+  // doesn't visually flip to "checked" until Pep finishes saying it.
   const universeStage = screener.stages[0];
   useEffect(() => {
-    if (universeNarratedRef.current) return;
+    if (universeQueuedRef.current) return;
+    if (universeSpoken) return;
     if (!isStarted) return;
     if (tavusStatus !== "ready") return;
     if (mode !== "screening") return;
     if (introSpokenForPreset !== preset) return;
     if (!universeStage) return;
-    universeNarratedRef.current = true;
+    universeQueuedRef.current = true;
     const count = universeStage.count;
-    queueMicrotask(() => narrate(describeUniverseStage(count)));
+    queueMicrotask(async () => {
+      await narrate(describeUniverseStage(count));
+      setUniverseSpoken(true);
+    });
   }, [
     isStarted,
     tavusStatus,
@@ -243,6 +261,7 @@ export function ScreenPage() {
     preset,
     introSpokenForPreset,
     universeStage,
+    universeSpoken,
     narrate,
   ]);
 
@@ -310,11 +329,15 @@ export function ScreenPage() {
       }
 
       // Mid-session switch: reset, mark intro/universe as already
-      // resolved so the auto-fire effects stay silent, then narrate
-      // the brief transition (and auto-run for methodology).
+      // resolved so the auto-fire effects stay silent and the rail
+      // shows them as completed (the transition narration substitutes
+      // for them). Then narrate the brief transition (and auto-run
+      // for methodology).
       screener.reset();
+      introQueuedForPresetRef.current = newPreset;
       setIntroSpokenForPreset(newPreset);
-      universeNarratedRef.current = true;
+      universeQueuedRef.current = true;
+      setUniverseSpoken(true);
 
       if (newPreset === "methodology") {
         narrate(describeMethodologyTransition());
@@ -437,7 +460,9 @@ export function ScreenPage() {
         case "restart":
           screener.reset();
           setIntroSpokenForPreset(null);
-          universeNarratedRef.current = false;
+          introQueuedForPresetRef.current = null;
+          setUniverseSpoken(false);
+          universeQueuedRef.current = false;
           narrate(describeRestart());
           break;
         case "fallback":
@@ -704,6 +729,7 @@ export function ScreenPage() {
                     stages={screener.stages}
                     pending={pending}
                     intro={{ label: "Introduction", spoken: introSpokenForPreset === preset }}
+                    universeSpoken={universeSpoken}
                   />
                 </>
               ) : (
@@ -744,7 +770,9 @@ export function ScreenPage() {
                       onClick={() => {
                         screener.reset();
                         setIntroSpokenForPreset(null);
-                        universeNarratedRef.current = false;
+                        introQueuedForPresetRef.current = null;
+                        setUniverseSpoken(false);
+                        universeQueuedRef.current = false;
                         narrate(describeRestart());
                       }}
                       disabled={isBusy || screener.stages.length <= 1}

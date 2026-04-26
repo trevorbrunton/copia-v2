@@ -157,17 +157,33 @@ export function ScreenPage() {
 
   /**
    * Append an assistant line to the transcript AND have Pep speak it
-   * via Tavus echo when the avatar is ready. Best-effort — avatar
-   * failures are logged but don't break the text path.
+   * via Tavus echo when the avatar is ready.
+   *
+   * Echoes are serialized through `narrationQueueRef`: each call
+   * chains onto the previous one so a rapid second narrate (e.g. the
+   * universe-stage line firing right after the intro) doesn't
+   * interrupt the in-flight speech. Tavus's echoResolveRef inside
+   * useTavusAvatar holds only one resolver at a time — sending a
+   * second echo while one is still playing was overwriting the first
+   * resolver and triggering a mid-sentence cut. The queue keeps the
+   * audio contiguous.
+   *
+   * Returns the promise that resolves when this specific narration
+   * finishes speaking, so callers that want to chain (or just await
+   * for sequencing) can. Existing fire-and-forget callers ignore it.
    */
+  const narrationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const narrate = useCallback(
-    (text: string) => {
+    (text: string): Promise<void> => {
       appendTranscript("assistant", text);
-      if (tavusReadyRef.current) {
+      if (!tavusReadyRef.current) return Promise.resolve();
+      const next = narrationQueueRef.current.then(() =>
         tavusAvatar.echo(text).catch((err) => {
           console.warn("[screen] tavus echo failed:", err);
-        });
-      }
+        })
+      );
+      narrationQueueRef.current = next;
+      return next;
     },
     [appendTranscript, tavusAvatar]
   );

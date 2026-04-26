@@ -30,11 +30,13 @@ import {
   describeFunnelComplete,
   describeInitialScreenStart,
   describeMethodologyIntro,
+  describeMethodologyTransition,
   describeMonitoringEnabled,
   describeOutputEmail,
   describeOutputShow,
   describePortfolioOverlap,
   describeQuestionnaireIntro,
+  describeQuestionnaireTransition,
   describeRestart,
   describeStockFactRequest,
   describeStockFactUnresolved,
@@ -280,6 +282,49 @@ export function ScreenPage() {
       if (!ok) break;
     }
   }, [screener, applyAndNarrate]);
+
+  /**
+   * Preset toggle handler with two paths:
+   *
+   * - **First-time selection** (no funnel progress yet) → narrate the
+   *   full preset intro so the audience hears the philosophy framing.
+   * - **Mid-session switch** (funnel has run filters) → reset the
+   *   funnel, narrate a brief transition cue, and (for methodology
+   *   only) auto-run the full screen end-to-end so the audience can
+   *   compare. The questionnaire's value is the step-by-step walk-
+   *   through, so it's not auto-run on switch.
+   *
+   * Mark intro as "spoken" for the new preset so the auto-fire effect
+   * doesn't re-trigger the full philosophy intro on top of the
+   * brief transition.
+   */
+  const switchPreset = useCallback(
+    (newPreset: Preset) => {
+      if (newPreset === preset) return;
+      const hasProgress = screener.stages.length > 1;
+      setPreset(newPreset);
+
+      if (!hasProgress) {
+        narrateIntroFor(newPreset);
+        return;
+      }
+
+      // Mid-session switch: reset, mark intro/universe as already
+      // resolved so the auto-fire effects stay silent, then narrate
+      // the brief transition (and auto-run for methodology).
+      screener.reset();
+      setIntroSpokenForPreset(newPreset);
+      universeNarratedRef.current = true;
+
+      if (newPreset === "methodology") {
+        narrate(describeMethodologyTransition());
+        void runInitialScreen();
+      } else {
+        narrate(describeQuestionnaireTransition());
+      }
+    },
+    [preset, screener, narrate, narrateIntroFor, runInitialScreen]
+  );
 
   const handleIntent = useCallback(
     async (intent: Intent) => {
@@ -641,15 +686,8 @@ export function ScreenPage() {
                         <button
                           key={p}
                           type="button"
-                          onClick={() => {
-                            setPreset(p);
-                            // Speak the intro for the new preset on
-                            // toggle (the auto-fire effect would also
-                            // catch this, but this gives an immediate
-                            // response for the click).
-                            narrateIntroFor(p);
-                          }}
-                          disabled={screener.stages.length > 1}
+                          onClick={() => switchPreset(p)}
+                          disabled={isBusy}
                           className={`rounded px-2 py-1 text-xs ${
                             preset === p
                               ? "bg-white text-[var(--oc-navy)]"

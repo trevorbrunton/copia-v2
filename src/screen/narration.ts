@@ -145,6 +145,24 @@ export function describeMethodologyIntro(): string {
   return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC's investable universe is defined by an initial screen that removes companies they consider unsuitable — too small, not profitable or cash-flow positive, single-commodity miners, complex or unproven technology, illiquid names, and the ASX 100 since OC is a small-cap manager. What's left is the starting point for the OC Premium Small Companies Fund. I'll run that full screen end-to-end now.`;
 }
 
+/**
+ * Brief transition spoken when the user toggles to the OC methodology
+ * mid-session (after running the questionnaire). Skips the full intro
+ * — the audience has already heard the philosophy framing — and just
+ * cues the comparison.
+ */
+export function describeMethodologyTransition(): string {
+  return `Now let's compare the full OC Funds stock filtering process.`;
+}
+
+/**
+ * Brief transition spoken when the user toggles back to the
+ * questionnaire mid-session.
+ */
+export function describeQuestionnaireTransition(): string {
+  return `Back to the questionnaire walk-through. Click Next to step through it.`;
+}
+
 /** Narration when the funnel is already complete and `next_step` is asked. */
 export function describeFunnelComplete(): string {
   return `The funnel is already complete. Try Reset to start over.`;

@@ -114,6 +114,26 @@ export function describeInitialScreenStart(): string {
   return `Running the OC initial screen — applying market cap above $50m, profitable, cash-flow positive, the curated exclusions, liquidity, and the ASX 100 cut.`;
 }
 
+/**
+ * Spoken introduction for the Questionnaire (Pep's 8 Qs) preset.
+ * Source: docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt §1.2 +
+ * §2.2 + §2.7 — OC's investment philosophy and the FSC-questionnaire-
+ * style criteria. Spoken once per session per preset.
+ */
+export function describeQuestionnaireIntro(): string {
+  return `OC is a benchmark-unaware Australian equities manager — they take a stock-specific, bottom-up approach and assess each company on its own merits, not its index weight. The methodology I'll walk you through filters out a few categories of company by design: those that are too small, unprofitable, too speculative, or insufficiently liquid. I'll apply each criterion one at a time so you can see how the universe narrows.`;
+}
+
+/**
+ * Spoken introduction for the OC methodology preset.
+ * Source: docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt §2.9
+ * (Initial Screen) + §2.7 (universe exclusions). Spoken once per
+ * session per preset.
+ */
+export function describeMethodologyIntro(): string {
+  return `OC's investable universe is defined by an initial screen that removes companies they consider unsuitable — too small, not profitable or cash-flow positive, single-commodity miners, complex or unproven technology, illiquid names, and the ASX 100 since OC is a small-cap manager. What's left is the starting point for the OC Premium Small Companies Fund. I'll run that full screen end-to-end now.`;
+}
+
 /** Narration when the funnel is already complete and `next_step` is asked. */
 export function describeFunnelComplete(): string {
   return `The funnel is already complete. Try Reset to start over.`;

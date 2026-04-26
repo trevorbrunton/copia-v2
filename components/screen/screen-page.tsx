@@ -29,11 +29,13 @@ import {
   describeFundFactMissingFund,
   describeFunnelComplete,
   describeInitialScreenStart,
+  describeMethodologyIntro,
   describeMonitoringEnabled,
   describeOpening,
   describeOutputEmail,
   describeOutputShow,
   describePortfolioOverlap,
+  describeQuestionnaireIntro,
   describeRestart,
   describeStockFactRequest,
   describeStockFactUnresolved,
@@ -65,6 +67,12 @@ export function ScreenPage() {
   const tavusAvatar = useTavusAvatar();
 
   const [preset, setPreset] = useState<Preset>("questionnaire");
+  // Tracks which preset's introduction has already been spoken this
+  // session. Reset on funnel reset. Lets the intro be a real "step 1"
+  // in the rail without firing twice if the user toggles back-and-
+  // forth between presets.
+  const [introSpokenForPreset, setIntroSpokenForPreset] =
+    useState<Preset | null>(null);
   const [mode, setMode] = useState<Mode>("screening");
   const [activeFund, setActiveFund] = useState<FundId>("mid_cap");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
@@ -164,6 +172,39 @@ export function ScreenPage() {
   );
 
   /**
+   * Speak the introduction for the given preset, once per session per
+   * preset. The intro is a brief framing of OC's investment philosophy
+   * and what the chosen track will demonstrate (source: the FSC
+   * questionnaire — see narration.ts). Renders as the first item in
+   * the funnel rail.
+   */
+  const narrateIntroFor = useCallback(
+    (p: Preset) => {
+      if (introSpokenForPreset === p) return;
+      setIntroSpokenForPreset(p);
+      narrate(
+        p === "methodology"
+          ? describeMethodologyIntro()
+          : describeQuestionnaireIntro()
+      );
+    },
+    [introSpokenForPreset, narrate]
+  );
+
+  // Auto-fire the intro once the avatar is ready AND the snapshot has
+  // loaded AND the user is in screening mode. Mirrors the opener's
+  // pattern but gates on `introSpokenForPreset` so toggling presets
+  // back-and-forth doesn't re-narrate. The preset-toggle handler also
+  // calls narrateIntroFor explicitly when switching mid-session.
+  useEffect(() => {
+    if (!isStarted) return;
+    if (tavusStatus !== "ready") return;
+    if (mode !== "screening") return;
+    if (introSpokenForPreset === preset) return;
+    queueMicrotask(() => narrateIntroFor(preset));
+  }, [isStarted, tavusStatus, mode, preset, introSpokenForPreset, narrateIntroFor]);
+
+  /**
    * Apply a filter and narrate the outcome.
    *
    * `applyFilter` returns null both on real failures AND on early-return
@@ -215,6 +256,7 @@ export function ScreenPage() {
           break;
         case "apply_initial_screen":
           if (preset !== "methodology") setPreset("methodology");
+          narrateIntroFor("methodology");
           narrate(describeInitialScreenStart());
           await runInitialScreen();
           break;
@@ -309,6 +351,7 @@ export function ScreenPage() {
         }
         case "restart":
           screener.reset();
+          setIntroSpokenForPreset(null);
           narrate(describeRestart());
           break;
         case "fallback":
@@ -323,6 +366,7 @@ export function ScreenPage() {
       preset,
       runInitialScreen,
       narrate,
+      narrateIntroFor,
       applyAndNarrate,
       mode,
       activeFund,
@@ -556,7 +600,14 @@ export function ScreenPage() {
                         <button
                           key={p}
                           type="button"
-                          onClick={() => setPreset(p)}
+                          onClick={() => {
+                            setPreset(p);
+                            // Speak the intro for the new preset on
+                            // toggle (the auto-fire effect would also
+                            // catch this, but this gives an immediate
+                            // response for the click).
+                            narrateIntroFor(p);
+                          }}
                           disabled={screener.stages.length > 1}
                           className={`rounded px-2 py-1 text-xs ${
                             preset === p
@@ -570,7 +621,11 @@ export function ScreenPage() {
                     </div>
                   </div>
 
-                  <FunnelRail stages={screener.stages} pending={pending} />
+                  <FunnelRail
+                    stages={screener.stages}
+                    pending={pending}
+                    intro={{ label: "Introduction", spoken: introSpokenForPreset === preset }}
+                  />
                 </>
               ) : (
                 <div className="flex flex-col gap-2 text-xs text-white/60">
@@ -609,6 +664,7 @@ export function ScreenPage() {
                     <Button
                       onClick={() => {
                         screener.reset();
+                        setIntroSpokenForPreset(null);
                         narrate(describeRestart());
                       }}
                       disabled={isBusy || screener.stages.length <= 1}

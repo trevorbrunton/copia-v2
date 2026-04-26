@@ -139,7 +139,7 @@ export function describeUniverseStage(count: number): string {
  * session greeting (no separate opener fires before this).
  */
 export function describeQuestionnaireIntro(): string {
-  return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC is a benchmark-unaware Australian equities manager — they take a stock-specific, bottom-up approach and assess each company on its own merits, not its index weight. The methodology I'll walk you through filters out a few categories of company by design: those that are too small, unprofitable, too speculative, or insufficiently liquid. I'll apply each criterion one at a time so you can see how the universe narrows. You can run through the filters in order by clicking the Next filter button, or just click on the filter you want to run, or just tell me what filter you want me to run — but don't forget to click on the unmute button.`;
+  return `Hi, I'm Pep. Let me tell you about the OC Funds Management stock filtering approach. OC is a benchmark-unaware Australian equities manager — they take a stock-specific, bottom-up approach and assess each company on its own merits, not its index weight. The methodology I'll walk you through filters out a few categories of company by design: those that are too small, unprofitable, too speculative, or insufficiently liquid. I'll apply each criterion one at a time so you can see how the universe narrows. You can run through the filters in order by clicking the Next filter button, or just click on the filter you want to run, or just tell me what filter you want me to run — but don't forget to click on the unmute button first.`;
 }
 
 /** Narration when the funnel is already complete and `next_step` is asked. */

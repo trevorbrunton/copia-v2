@@ -1,6 +1,6 @@
 "use client";
 
-import type { Stage } from "@/src/screen/funnel";
+import type { FilterId, Stage } from "@/src/screen/funnel";
 import { Check, Circle, MessageSquare } from "lucide-react";
 
 /**
@@ -12,10 +12,16 @@ import { Check, Circle, MessageSquare } from "lucide-react";
  * rail — a brief Pep-spoken framing of the active preset before the
  * universe stage. Distinct icon (speech bubble) so it doesn't read as
  * a filter outcome.
+ *
+ * `onPendingClick` makes pending items clickable so the user can run
+ * filters out of sequence (e.g. skip ahead to Q4 directly). When
+ * omitted, pending items are static <li>. Disabled-state guarding
+ * (e.g. while a filter is in flight) is the parent's responsibility
+ * via `pendingDisabled`.
  */
 interface FunnelRailProps {
   stages: Stage[];
-  pending?: { id: string; label: string }[];
+  pending?: { id: FilterId; label: string }[];
   intro?: { label: string; spoken: boolean };
   /**
    * When `intro` is supplied, the FIRST stage in `stages` is the
@@ -25,6 +31,10 @@ interface FunnelRailProps {
    * checked once spoken. Defaults to `true` (legacy behavior).
    */
   universeSpoken?: boolean;
+  /** Click handler for a pending filter — enables out-of-order runs. */
+  onPendingClick?: (filterId: FilterId) => void;
+  /** Disable pending click targets (e.g. during apply-in-flight). */
+  pendingDisabled?: boolean;
   className?: string;
 }
 
@@ -33,6 +43,8 @@ export function FunnelRail({
   pending = [],
   intro,
   universeSpoken = true,
+  onPendingClick,
+  pendingDisabled = false,
   className,
 }: FunnelRailProps) {
   return (
@@ -98,17 +110,33 @@ export function FunnelRail({
           </li>
         );
       })}
-      {pending.map((p) => (
-        <li
-          key={`pending-${p.id}`}
-          className="flex items-center gap-3 text-white/40"
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/15">
-            <Circle className="h-2.5 w-2.5" />
-          </span>
-          <span className="flex-1 truncate">{p.label}</span>
-        </li>
-      ))}
+      {pending.map((p) => {
+        const content = (
+          <>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/15 group-hover:ring-white/30">
+              <Circle className="h-2.5 w-2.5" />
+            </span>
+            <span className="flex-1 truncate text-left">{p.label}</span>
+          </>
+        );
+        return (
+          <li key={`pending-${p.id}`}>
+            {onPendingClick ? (
+              <button
+                type="button"
+                onClick={() => onPendingClick(p.id)}
+                disabled={pendingDisabled}
+                className="group flex w-full items-center gap-3 rounded text-white/40 transition hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-white/40"
+                title="Run this filter (out of sequence)"
+              >
+                {content}
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 text-white/40">{content}</div>
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }

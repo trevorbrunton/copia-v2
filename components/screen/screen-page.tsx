@@ -109,17 +109,22 @@ export function ScreenPage() {
 
   const sequence = QUESTIONNAIRE_FILTERS;
 
+  // Filters that haven't been applied yet, in canonical sequence order.
+  // Filtering by `completedStageIds` (rather than just slicing from the
+  // first uncompleted) is what lets the user run filters out of step:
+  // applying Q4 directly leaves Q2/Q3 in `pending` so they can still
+  // be picked up afterward without appearing twice.
   const completedStageIds: StageId[] = screener.stages.map((s) => s.id);
-  const nextIdx = sequence.findIndex((f) => !completedStageIds.includes(f));
-  const nextFilter: FilterId | null = nextIdx >= 0 ? sequence[nextIdx] : null;
-
   const pending = useMemo(
     () =>
       sequence
-        .slice(nextIdx >= 0 ? nextIdx : sequence.length)
+        .filter((id) => !completedStageIds.includes(id))
         .map((id) => ({ id, label: STAGE_LABELS[id] })),
-    [sequence, nextIdx]
+    [sequence, completedStageIds]
   );
+  // "Next" advances through the canonical sequence — the first filter
+  // not yet applied. Out-of-order clicks bypass this entirely.
+  const nextFilter: FilterId | null = pending[0]?.id ?? null;
 
   const isStarted = screener.snapshot !== null;
   const isBusy = screener.status === "loading" || screener.status === "applying";
@@ -687,6 +692,8 @@ export function ScreenPage() {
                   pending={pending}
                   intro={{ label: "Introduction", spoken: introSpoken }}
                   universeSpoken={universeSpoken}
+                  onPendingClick={(filterId) => void applyAndNarrate(filterId)}
+                  pendingDisabled={isBusy}
                 />
               ) : mode === "fund_qa" ? (
                 <div className="flex flex-col gap-2 text-xs text-white/60">

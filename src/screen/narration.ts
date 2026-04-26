@@ -100,6 +100,15 @@ export function describeStockFactUnresolved(): string {
   return `I'm not sure which stock that is — please tell me the ticker code of that stock.`;
 }
 
+/**
+ * Narration when the user asks about an individual stock mid-funnel.
+ * We hold off on the per-stock pipeline until all filters have run so
+ * the audience focuses on the funnel narrative first.
+ */
+export function describeStockFactGatedByFunnel(): string {
+  return `Let's finish the screen first — once all the filters have run we can drill into individual stocks.`;
+}
+
 /** Narration for Q8 portfolio overlap with results. */
 export function describePortfolioOverlap(args: {
   matching: number;

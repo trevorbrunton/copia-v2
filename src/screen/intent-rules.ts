@@ -237,6 +237,10 @@ const RULES: Rule[] = [
     pattern: /\b50\s+million\b.*\b(?:market\s+cap|capitalization)/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q1_MCAP_50M }),
   },
+  {
+    pattern: /\b(?:market\s+cap|mcap|size)\s+(?:filter|check|test|screen)\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q1_MCAP_50M }),
+  },
 
   // Q2: exclude top 100 by mcap (OC is small/mid-cap — largest names
   // are out of scope). Triggers on "top 100" phrasing in either form
@@ -256,8 +260,16 @@ const RULES: Rule[] = [
     pattern: /\b20\s*(?:%|percent)\b.*\bturnover/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q3_TURNOVER_20 }),
   },
+  {
+    pattern: /\b(?:turnover|liquidity)\s+(?:filter|check|test|screen)\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q3_TURNOVER_20 }),
+  },
 
-  // Q4: profitable
+  // Q4: profitable. The "X filter" phrasings ("run the profitability
+  // filter", "apply profitability") sit alongside the original Pep
+  // brief wordings — and must precede the generic earnings_status
+  // stock-fact rule in POST_FUND_INFO_RULES that also matches
+  // "profitability".
   {
     pattern: /\b(?:remove|filter\s+out|exclude)\b.*\b(?:un|not\s+)?profitable\b/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q4_PROFITABLE }),
@@ -270,6 +282,14 @@ const RULES: Rule[] = [
     pattern: /\bprofitable\s+(?:companies|stocks?|names?)\b/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q4_PROFITABLE }),
   },
+  {
+    pattern: /\bprofitabilit(?:y|ies)\s+(?:filter|check|test|screen)\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q4_PROFITABLE }),
+  },
+  {
+    pattern: /\b(?:run|apply|do)\s+(?:the\s+)?profitabilit(?:y|ies)\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q4_PROFITABLE }),
+  },
 
   // Q5: unproven / complex tech
   {
@@ -280,6 +300,10 @@ const RULES: Rule[] = [
     pattern: /\bcomplex\s+tech/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q5_UNPROVEN_TECH }),
   },
+  {
+    pattern: /\b(?:tech|technology)\s+(?:filter|check|test|screen)\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q5_UNPROVEN_TECH }),
+  },
 
   // Q6: single commodity / single mine
   {
@@ -288,6 +312,10 @@ const RULES: Rule[] = [
   },
   {
     pattern: /\bsingle[\s-]mine\b/,
+    build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q6_SINGLE_COMMODITY }),
+  },
+  {
+    pattern: /\b(?:commodity|mine|miner|miners)\s+(?:filter|check|test|screen)\b/,
     build: () => ({ kind: "apply_filter", filterId: STAGE_IDS.Q6_SINGLE_COMMODITY }),
   },
 

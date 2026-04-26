@@ -37,6 +37,7 @@ import {
   describeProcessQaIntro,
   describeQuestionnaireIntro,
   describeRestart,
+  describeStockFactGatedByFunnel,
   describeStockFactRequest,
   describeStockFactUnresolved,
   describeUniverseStage,
@@ -345,6 +346,17 @@ export function ScreenPage() {
           narrate(describeOutputEmail());
           break;
         case "info_stock_field":
+          // Hold off on individual-stock lookups until the funnel is
+          // complete in screening mode. Mid-funnel, this also stops
+          // misclassified utterances ("run the profitability filter"
+          // accidentally caught by the earnings_status pattern when a
+          // closer Q4 rule didn't match) from falling into the
+          // "tell me the ticker" dead-end. fund_qa / process_qa modes
+          // aren't gated — they don't use the funnel.
+          if (mode === "screening" && pending.length > 0) {
+            narrate(describeStockFactGatedByFunnel());
+            break;
+          }
           if (intent.ticker) {
             setSelectedTicker(intent.ticker);
             narrate(
@@ -445,7 +457,7 @@ export function ScreenPage() {
           break;
       }
     },
-    [screener, nextFilter, narrate, applyAndNarrate, mode, activeFund]
+    [screener, nextFilter, narrate, applyAndNarrate, mode, activeFund, pending]
   );
 
   /**

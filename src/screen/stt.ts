@@ -62,7 +62,14 @@ const RETRY_DELAYS_MS = [400, 1000] as const;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** ElevenLabs response body shape for rate-limit errors (ignore-other-fields). */
+/**
+ * ElevenLabs response body shape for rate-limit errors. Both `code`
+ * and `status` are checked downstream because observed payloads carry
+ * one or the other (sometimes both) depending on the failure mode —
+ * this is not a documented contract from ElevenLabs, just a defensive
+ * read against what they currently return. Re-test against the live
+ * API if their error shape changes.
+ */
 interface ElevenLabsErrorBody {
   detail?: { code?: string; status?: string; message?: string };
 }

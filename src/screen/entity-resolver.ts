@@ -143,7 +143,11 @@ function levenshtein(a: string, b: string, max: number): number {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  let curr = new Array(b.length + 1);
+  // Explicit `.fill(0)` (rather than `new Array(...)`) so the row is a
+  // packed numeric array from allocation. The first iteration writes
+  // every cell, but explicit init avoids any V8 hole-array fallback if
+  // this code is ever copied without the fill loop.
+  let curr: number[] = Array(b.length + 1).fill(0);
   for (let i = 1; i <= a.length; i++) {
     curr[0] = i;
     let rowMin = i;
@@ -206,13 +210,21 @@ function namePass(text: string, nameByTicker: Map<string, string>): string | nul
  * tokens and tries them as exact single-token matches. Catches STT
  * splits like "common wealth" → "commonwealth" → CBA, or
  * "next dc" → "nextdc" → NXT.
+ *
+ * Stop-word filter applied symmetrically: pairs starting OR ending
+ * with a stop-word are skipped so e.g. "the holdings" can't form a
+ * joined token that incidentally collides with a real name fragment.
+ * (The name side already filters stop-words via `nameTokens`.)
  */
 function joinedTokenPass(text: string, nameByTicker: Map<string, string>): string | null {
   const toks = textTokens(text, 1);
   if (toks.length < 2) return null;
   const joined: string[] = [];
   for (let i = 0; i < toks.length - 1; i++) {
-    const j = toks[i] + toks[i + 1];
+    const a = toks[i];
+    const b = toks[i + 1];
+    if (NAME_STOPWORDS.has(a) || NAME_STOPWORDS.has(b)) continue;
+    const j = a + b;
     if (j.length >= SINGLE_TOKEN_MIN_LEN) joined.push(j);
   }
   if (joined.length === 0) return null;

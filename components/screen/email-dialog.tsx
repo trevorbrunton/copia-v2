@@ -18,8 +18,11 @@ import { Input } from "@/components/ui/input";
  * list" workflow. Email sending is **not** implemented — `onSend` just
  * fires the parent's stub (logs + narrates) and the dialog closes.
  *
- * Kept self-contained: own input state, basic validation, autofocus on
- * open. Parent owns open/close via `open` + `onOpenChange`.
+ * Form state lives in an inner `EmailDialogForm` component, mounted
+ * with `key={open ? "open" : "closed"}` so each open cycle gets a
+ * fresh component instance. This avoids both the
+ * `react-hooks/set-state-in-effect` lint rule AND the rapid
+ * close→open race a queueMicrotask reset would introduce.
  */
 interface EmailDialogProps {
   open: boolean;
@@ -31,37 +34,6 @@ interface EmailDialogProps {
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function EmailDialog({ open, onOpenChange, shortlistCount, onSend }: EmailDialogProps) {
-  const [email, setEmail] = useState("");
-  const [touched, setTouched] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Reset on open so a re-trigger after Cancel starts fresh. State
-  // resets are deferred via queueMicrotask to satisfy React 19's
-  // `react-hooks/set-state-in-effect` rule (effect bodies shouldn't
-  // synchronously trigger renders). Microtask ordering is enough — it
-  // runs before paint, so the user never sees stale input briefly.
-  useEffect(() => {
-    if (!open) return;
-    queueMicrotask(() => {
-      setEmail("");
-      setTouched(false);
-    });
-    // Radix focuses the close button by default; nudge focus to the
-    // input on the next paint so the user can start typing immediately.
-    const t = setTimeout(() => inputRef.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, [open]);
-
-  const isValid = EMAIL_PATTERN.test(email.trim());
-  const showError = touched && !isValid && email.length > 0;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTouched(true);
-    if (!isValid) return;
-    onSend(email.trim());
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -76,37 +48,73 @@ export function EmailDialog({ open, onOpenChange, shortlistCount, onSend }: Emai
             leaves the system.)
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <Input
-            ref={inputRef}
-            type="email"
-            inputMode="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => setTouched(true)}
-            aria-invalid={showError}
-            aria-describedby={showError ? "email-error" : undefined}
+        {open ? (
+          <EmailDialogForm
+            key="open"
+            onCancel={() => onOpenChange(false)}
+            onSend={onSend}
           />
-          {showError ? (
-            <p id="email-error" className="text-xs text-destructive">
-              That doesn&apos;t look like a valid email address.
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!isValid}>
-              Send
-            </Button>
-          </DialogFooter>
-        </form>
+        ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface EmailDialogFormProps {
+  onCancel: () => void;
+  onSend: (email: string) => void;
+}
+
+function EmailDialogForm({ onCancel, onSend }: EmailDialogFormProps) {
+  const [email, setEmail] = useState("");
+  const [touched, setTouched] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Radix focuses the dialog's close button by default; nudge focus
+  // to the input on the next paint so the user can start typing
+  // immediately. No setState here, so React 19's set-state-in-effect
+  // rule is satisfied without ceremony.
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  const isValid = EMAIL_PATTERN.test(email.trim());
+  const showError = touched && !isValid && email.length > 0;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!isValid) return;
+    onSend(email.trim());
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <Input
+        ref={inputRef}
+        type="email"
+        inputMode="email"
+        placeholder="you@example.com"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        onBlur={() => setTouched(true)}
+        aria-invalid={showError}
+        aria-describedby={showError ? "email-error" : undefined}
+      />
+      {showError ? (
+        <p id="email-error" className="text-xs text-destructive">
+          That doesn&apos;t look like a valid email address.
+        </p>
+      ) : null}
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={!isValid}>
+          Send
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }

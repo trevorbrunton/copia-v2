@@ -180,15 +180,17 @@ export function ScreenPage() {
    * that drain so the next narration doesn't trample the tail of the
    * current one. It also gives the audience a beat between thoughts.
    *
-   * Returns the promise that resolves when this specific narration
-   * finishes (including the trailing pause), so callers that want to
-   * chain can. Existing fire-and-forget callers ignore it.
+   * Returns a Promise that resolves with `true` when the audio actually
+   * played (echo + trailing pause completed), or `false` when Tavus
+   * wasn't ready and we silently skipped the echo. Callers that flip
+   * "spoken" UI state should gate on `true` so the rail doesn't
+   * incorrectly show a checkmark for a line Pep never said.
    */
   const narrationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const narrate = useCallback(
-    (text: string): Promise<void> => {
+    (text: string): Promise<boolean> => {
       appendTranscript("assistant", text);
-      if (!tavusReadyRef.current) return Promise.resolve();
+      if (!tavusReadyRef.current) return Promise.resolve(false);
       const next = narrationQueueRef.current
         .then(() =>
           tavusAvatar.echo(text).catch((err) => {
@@ -199,7 +201,7 @@ export function ScreenPage() {
           () => new Promise<void>((r) => setTimeout(r, INTER_NARRATION_PAUSE_MS))
         );
       narrationQueueRef.current = next;
-      return next;
+      return next.then(() => true);
     },
     [appendTranscript, tavusAvatar]
   );
@@ -219,8 +221,16 @@ export function ScreenPage() {
       if (introSpoken) return;
       if (!universeStage) return;
       introQueuedRef.current = true;
-      await narrate(describeQuestionnaireIntro(universeStage.count));
-      setIntroSpoken(true);
+      const played = await narrate(describeQuestionnaireIntro(universeStage.count));
+      // Only flip the "intro spoken" rail tick if Pep actually said it.
+      // If Tavus disconnected between effect-fire and callback-run, the
+      // narrate() short-circuited; let the next render re-trigger from
+      // the queueMicrotask chain once the avatar reconnects.
+      if (played) {
+        setIntroSpoken(true);
+      } else {
+        introQueuedRef.current = false;
+      }
     },
     [introSpoken, universeStage, narrate]
   );
@@ -244,7 +254,8 @@ export function ScreenPage() {
 
   // Auto-fire the Process Q&A intro the first time the user enters
   // process_qa mode. One-shot per session — same pattern as the
-  // screening intro but gated on a separate flag.
+  // screening intro, including the played-signal gate on the state
+  // flip so a mid-flight Tavus disconnect doesn't lock the intro out.
   useEffect(() => {
     if (mode !== "process_qa") return;
     if (tavusStatus !== "ready") return;
@@ -252,10 +263,20 @@ export function ScreenPage() {
     if (processIntroSpoken) return;
     processIntroQueuedRef.current = true;
     queueMicrotask(async () => {
-      await narrate(describeProcessQaIntro());
-      setProcessIntroSpoken(true);
+      const played = await narrate(describeProcessQaIntro());
+      if (played) {
+        setProcessIntroSpoken(true);
+      } else {
+        processIntroQueuedRef.current = false;
+      }
     });
   }, [mode, tavusStatus, processIntroSpoken, narrate]);
+
+  // Funnel-complete gate shared by the four screening-mode paths that
+  // require the full shortlist (info_stock_field intent, row click,
+  // output_email intent, and the email-dialog title). Single source of
+  // truth so the four sites can't drift.
+  const isStockLookupGated = mode === "screening" && pending.length > 0;
 
   /**
    * Apply a filter and narrate the outcome.
@@ -318,10 +339,17 @@ export function ScreenPage() {
           break;
         }
         case "output_email":
-          // Same funnel-gate as info_stock_field — only invite the
-          // email workflow once all six filters have run, since the
-          // shortlist isn't meaningful before that.
-          if (mode === "screening" && pending.length > 0) {
+          // Funnel-gated for the same reason info_stock_field is —
+          // emailing a partial shortlist isn't useful. Also covers
+          // non-screening modes (fund_qa / process_qa) which have no
+          // shortlist at all; the user is told to switch modes.
+          if (mode !== "screening") {
+            narrate(
+              "The email workflow runs against the screening shortlist — switch to Screening mode and run the filters first."
+            );
+            break;
+          }
+          if (isStockLookupGated) {
             narrate(describeStockFactGatedByFunnel());
             break;
           }
@@ -336,8 +364,11 @@ export function ScreenPage() {
           // closer Q4 rule didn't match) from falling into the
           // "tell me the ticker" dead-end. fund_qa / process_qa modes
           // aren't gated — they don't use the funnel.
-          if (mode === "screening" && pending.length > 0) {
-            narrate(describeStockFactGatedByFunnel());
+          if (isStockLookupGated) {
+            // Confirm we heard the ticker if the resolver pinned one
+            // down — otherwise the audience may think Pep ignored
+            // them. Bare refusal stays for unresolved utterances.
+            narrate(describeStockFactGatedByFunnel(intent.ticker));
             break;
           }
           if (intent.ticker) {
@@ -440,7 +471,7 @@ export function ScreenPage() {
           break;
       }
     },
-    [screener, nextFilter, narrate, applyAndNarrate, mode, activeFund, pending]
+    [screener, nextFilter, narrate, applyAndNarrate, mode, activeFund, isStockLookupGated]
   );
 
   /**
@@ -479,13 +510,13 @@ export function ScreenPage() {
    */
   const selectStock = useCallback(
     (ticker: string) => {
-      if (mode === "screening" && pending.length > 0) {
-        narrate(describeStockFactGatedByFunnel());
+      if (isStockLookupGated) {
+        narrate(describeStockFactGatedByFunnel(ticker));
         return;
       }
       setSelectedTicker(ticker);
     },
-    [mode, pending, narrate]
+    [isStockLookupGated, narrate]
   );
 
   /**
@@ -494,9 +525,18 @@ export function ScreenPage() {
    * Wire this through to a real /api/v1/screen/email endpoint when
    * the workflow is productised.
    */
+  // Ref-mirror so handleEmailSend can read the current shortlist count
+  // without rebuilding (and propagating through React Compiler's auto-
+  // memoization) every time `screener.stages` changes — which is once
+  // per filter application.
+  const stagesRef = useRef(screener.stages);
+  useEffect(() => {
+    stagesRef.current = screener.stages;
+  }, [screener.stages]);
+
   const handleEmailSend = useCallback(
     (email: string) => {
-      const stage = screener.stages.at(-1);
+      const stage = stagesRef.current.at(-1);
       const count = stage?.count ?? 0;
       console.info("[screen] email send (stub)", { email, shortlistCount: count });
       toast.success(`Email queued for ${email}`, {
@@ -505,7 +545,7 @@ export function ScreenPage() {
       setEmailDialogOpen(false);
       narrate(describeOutputEmailQueued(email));
     },
-    [screener.stages, narrate]
+    [narrate]
   );
 
   /**

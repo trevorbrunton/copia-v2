@@ -225,7 +225,7 @@ bun dev                            # http://localhost:3000
 ```bash
 bun run lint                    # ESLint
 bunx tsc --noEmit               # Strict TypeScript check
-bun run test                    # Vitest (181 cases across 9 files)
+bun run test                    # Vitest (197 cases across 9 files)
 bun run db:generate             # Generate Drizzle migration from schema diff
 bun run db:push                 # Push schema to Supabase (be careful in prod)
 bun run db:studio               # Drizzle Studio

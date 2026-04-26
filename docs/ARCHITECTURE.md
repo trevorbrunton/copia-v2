@@ -359,4 +359,4 @@ The plan's decision register (`docs/plans/pep-avatar-v2-plan.md` §12) records t
 
 - `bunx tsc --noEmit` — strict TypeScript, no errors.
 - `bun run lint` — ESLint + Next config; a single pre-existing React-Compiler warning in `components/settings/profile-tab.tsx:79` is documented and unrelated.
-- `bun run test` — Vitest. Currently **181/181 green** across 9 files: 8 screening-engine (filters, funnel-state, intent-rules, entity-resolution, market-data-provider, screen-matcher, numeric, routes) plus 1 server (rate-limit). The intent-rules suite has the bulk — it covers funnel-filter triggers, fund-info routing, process-info routing, generic stock-fact patterns, and several cross-rule precedence checks.
+- `bun run test` — Vitest. Currently **197/197 green** across 9 files: 8 screening-engine (filters, funnel-state, intent-rules, entity-resolution, market-data-provider, screen-matcher, numeric, routes) plus 1 server (rate-limit). The intent-rules suite has the bulk — it covers funnel-filter triggers, fund-info routing, process-info routing, generic stock-fact patterns, and several cross-rule precedence checks.

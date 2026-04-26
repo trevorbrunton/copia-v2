@@ -118,9 +118,16 @@ export function describeStockFactUnresolved(): string {
  * Narration when the user asks about an individual stock mid-funnel.
  * We hold off on the per-stock pipeline until all filters have run so
  * the audience focuses on the funnel narrative first.
+ *
+ * `subject` (optional) names what the user asked about (e.g. "BHP",
+ * "Westpac"), so Pep can confirm he heard the request rather than
+ * sounding like a generic refusal. Falls back to the bare line when
+ * the dispatcher doesn't know what was asked (row-click, output_email).
  */
-export function describeStockFactGatedByFunnel(): string {
-  return `Let's finish the screen first — once all the filters have run we can drill into individual stocks.`;
+export function describeStockFactGatedByFunnel(subject?: string): string {
+  return subject
+    ? `Let's finish the screen first — I'll have ${subject}'s details ready once all the filters have run.`
+    : `Let's finish the screen first — once all the filters have run we can drill into individual stocks.`;
 }
 
 /** Narration for Q8 portfolio overlap with results. */

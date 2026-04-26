@@ -149,11 +149,17 @@ The Pep demo runs several independent processing streams concurrently. This docu
 
 **What it is:** Resolves a ticker → a snapshot field projection (price, market cap, earnings status).
 
-**Triggered by:** `info_stock_field` intent with a resolved ticker — but **only after the funnel is complete** (gated in the dispatcher; mid-funnel queries get the `describeStockFactGatedByFunnel()` response instead). Also fired by clicking a row in the stocks table.
+**Triggered by:** Three entry points, all sharing the same funnel-complete gate (`isStockLookupGated = mode === "screening" && pending.length > 0`):
+
+1. **Voice / chat `info_stock_field` intent** — classified by the rule layer or filled in by the entity resolver in the `/process` route, then handled in the dispatcher case.
+2. **Bare-name fallback in `/process`** — when classification falls back to `fallback`, the route runs the entity resolver one more time; a unique hit becomes `info_stock_field` and re-enters path #1 in the dispatcher.
+3. **Row click in the StocksTable** — the `selectStock` callback is wired to `onTickerClick`. Same gate, same `describeStockFactGatedByFunnel(ticker)` response when the funnel is incomplete.
+
+When the gate is closed mid-funnel, all three paths narrate a confirmation that names the requested stock (e.g. *"Let's finish the screen first — I'll have BHP's details ready once all the filters have run"*) so the audience knows Pep heard them.
 
 **Active during:** Single request, <50 ms. Reads from the in-process snapshot cache.
 
-**Where it lives:** `app/api/v1/screen/stock-fact/route.ts`, `src/screen/market-data-provider.ts` (`SnapshotMarketDataProvider`), `components/screen/stock-fact-panel.tsx` (UI).
+**Where it lives:** `app/api/v1/screen/stock-fact/route.ts`, `src/screen/market-data-provider.ts` (`SnapshotMarketDataProvider`), `components/screen/stock-fact-panel.tsx` (UI), `components/screen/screen-page.tsx` (`selectStock`, dispatcher case).
 
 **Future:** A `LiveMarketDataProvider` could implement the same `MarketDataProvider` interface to swap in a real-time price feed (D3 — currently snapshot-only).
 

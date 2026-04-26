@@ -188,7 +188,11 @@ const PROCESS_TOPIC_PATTERNS: Array<[RegExp, ProcessTopicId]> = [
     "tax",
   ],
   [
-    /\b(?:investment\s+team|portfolio\s+manager|fund\s+manager|head\s+of\s+(?:invest|equit)|robert\s+frost|bruce\s+loveday|stephen\s+evans|who\s+(?:runs|leads|manages)\s+(?:the\s+)?(?:funds?|portfolios?|invest)|the\s+team)\b/i,
+    // Tightened away from the bare `\bthe\s+team\b` clause — that fired
+    // on common English ("what does the team think about NXT?") and
+    // hijacked stock-fact intents. Now requires either a name, a
+    // role-specific noun, or "OC team" / "investment team" framing.
+    /\b(?:investment\s+team|OC\s+team|OC's\s+team|head\s+of\s+(?:invest|equit)|robert\s+frost|bruce\s+loveday|stephen\s+evans|portfolio\s+manager|fund\s+manager|who\s+(?:runs|leads|manages)\s+(?:the\s+)?(?:funds?|portfolios?|invest))\b/i,
     "team",
   ],
 ];

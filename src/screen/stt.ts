@@ -51,8 +51,39 @@ function pcmToWav(pcm: ArrayBuffer, sampleRate: number): ArrayBuffer {
 }
 
 /**
+ * Backoff schedule for retryable STT failures (ElevenLabs 429 /
+ * "system_busy", or network blips). Three attempts total: the first
+ * call, then two retries at 400ms and 1000ms. Total worst-case wall
+ * time ≈ 14.4s (12s timeout + 1.4s backoffs) — still fits inside
+ * the route's overall 5/min rate limit comfortably.
+ */
+const RETRY_DELAYS_MS = [400, 1000] as const;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** ElevenLabs response body shape for rate-limit errors (ignore-other-fields). */
+interface ElevenLabsErrorBody {
+  detail?: { code?: string; status?: string; message?: string };
+}
+
+/**
+ * Should this STT failure be retried? Retries are scoped to truly
+ * transient signals — 429 (rate-limit / system busy), 502/503/504
+ * (gateway / availability blips). Hard 4xx (auth, bad request) bail
+ * out immediately so we don't hammer ElevenLabs on a config error.
+ */
+function isRetryableSttFailure(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/**
  * Transcribe PCM audio via ElevenLabs STT. Returns the transcribed
  * text trimmed; empty string when no speech detected.
+ *
+ * Retries up to 2x on 429 / 5xx. After the final retry exhausts, the
+ * raw upstream error JSON is replaced with a user-facing string so
+ * the dispatcher's narrate-on-error path doesn't read a stack trace.
  */
 export async function transcribePcm(args: {
   pcm: ArrayBuffer;
@@ -65,32 +96,60 @@ export async function transcribePcm(args: {
 
   const wav = pcmToWav(args.pcm, args.sampleRate);
 
-  const body = new FormData();
-  body.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
-  body.append("model_id", "scribe_v1");
-  body.append("language_code", "eng");
+  let lastStatus = 0;
+  let lastBody = "";
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS_MS[attempt - 1];
+      logger.warn(
+        { traceId: args.traceId, attempt, delay, lastStatus },
+        "screen:stt retry"
+      );
+      await sleep(delay);
+    }
 
-  const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
-    method: "POST",
-    headers: { "xi-api-key": ELEVENLABS_API_KEY },
-    body,
-    // Pitch-demo budget — a 30s hung STT call would freeze the whole
-    // voice loop. Fail fast and let the caller surface a retry.
-    signal: AbortSignal.timeout(12_000),
-  });
+    const body = new FormData();
+    body.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
+    body.append("model_id", "scribe_v1");
+    body.append("language_code", "eng");
 
-  if (!res.ok) {
-    const errBody = await res.text();
-    logger.error(
-      { traceId: args.traceId, status: res.status, body: errBody },
-      "screen:stt failed"
-    );
-    throw new ExternalServiceError(
-      `ElevenLabs STT error: ${res.status} ${errBody}`,
-      "elevenlabs"
-    );
+    const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+      method: "POST",
+      headers: { "xi-api-key": ELEVENLABS_API_KEY },
+      body,
+      // Per-attempt budget. A hung STT call would freeze the voice
+      // loop; better to fail fast and let the retry kick in.
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    if (res.ok) {
+      const result = (await res.json()) as { text?: string };
+      return (result.text ?? "").trim();
+    }
+
+    lastStatus = res.status;
+    lastBody = await res.text();
+    if (!isRetryableSttFailure(res.status)) break;
   }
 
-  const result = (await res.json()) as { text?: string };
-  return (result.text ?? "").trim();
+  logger.error(
+    { traceId: args.traceId, status: lastStatus, body: lastBody },
+    "screen:stt failed (after retries)"
+  );
+
+  // Friendlier message for "busy" / rate-limit situations — Pep
+  // narrates this verbatim via the dispatcher's catch block, so the
+  // user shouldn't hear a JSON dump.
+  let parsed: ElevenLabsErrorBody | null = null;
+  try {
+    parsed = JSON.parse(lastBody) as ElevenLabsErrorBody;
+  } catch {
+    /* non-JSON body — keep parsed = null */
+  }
+  const code = parsed?.detail?.code ?? parsed?.detail?.status;
+  const isBusy = lastStatus === 429 || code === "system_busy" || code === "rate_limit_error";
+  const friendly = isBusy
+    ? "Speech-to-text is busy right now — please try again in a moment."
+    : `Speech-to-text failed (${lastStatus}).`;
+  throw new ExternalServiceError(friendly, "elevenlabs");
 }

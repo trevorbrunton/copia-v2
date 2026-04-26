@@ -550,7 +550,12 @@ export function ScreenPage() {
         const data = (await res.json()) as { intent: Intent };
         await handleIntent(data.intent);
       } catch (e) {
-        narrate(`Error: ${e instanceof Error ? e.message : "couldn't classify the question"}.`);
+        const msg = e instanceof Error ? e.message : "I couldn't classify the question.";
+        // The /process route already returns user-friendly messages for
+        // transient failures (STT busy, classifier timeout) — surface
+        // those directly so Pep doesn't read a stack trace. Fall back
+        // to a generic line for unknown shapes.
+        narrate(msg);
       } finally {
         setIsThinking(false);
       }
@@ -580,7 +585,8 @@ export function ScreenPage() {
         appendTranscript("user", data.text);
         await handleIntent(data.intent);
       } catch (e) {
-        narrate(`Error: ${e instanceof Error ? e.message : "couldn't transcribe the audio"}.`);
+        const msg = e instanceof Error ? e.message : "I couldn't transcribe the audio.";
+        narrate(msg);
       } finally {
         setIsThinking(false);
       }

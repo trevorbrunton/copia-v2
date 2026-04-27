@@ -23,6 +23,16 @@ export type StockFact = {
   marketCap?: number;
   /** Derived from net_income TTM sign at ingest time — see plan §5b. */
   earningsStatus?: string;
+  /**
+   * GICS sector ("Financial Services", "Basic Materials", etc.) — only
+   * populated for stocks in the enriched top-500 projection. `undefined`
+   * for stocks present only in the light universe-wide projection.
+   */
+  sector?: string;
+  /** GICS sub-industry ("Banks - Diversified", "Other Industrial Metals & Mining"). */
+  gicsSubIndustry?: string;
+  /** Plain-English company description from the enriched feed. */
+  longBusinessSummary?: string;
   /** Not available from the snapshot in v2. Reserved for a future provider. */
   dayChangePct?: number;
   /** ISO-8601 timestamp the value relates to (snapshot's `collected_at`). */
@@ -71,6 +81,9 @@ export class SnapshotMarketDataProvider implements MarketDataProvider {
         marketCap: asxSecurities.marketCapSnapshot,
         closePrice: asxSecurities.closePriceSnapshot,
         earningsStatus: asxSecurities.earningsStatusSnapshot,
+        sector: asxSecurities.sector,
+        gicsSubIndustry: asxSecurities.gicsSubIndustry,
+        longBusinessSummary: asxSecurities.longBusinessSummary,
       })
       .from(asxSecurities)
       .where(and(eq(asxSecurities.snapshotId, active.id), eq(asxSecurities.ticker, ticker)))
@@ -91,6 +104,9 @@ export class SnapshotMarketDataProvider implements MarketDataProvider {
       sharePrice: sharePrice ?? undefined,
       marketCap: marketCap ?? undefined,
       earningsStatus: row.earningsStatus ?? undefined,
+      sector: row.sector ?? undefined,
+      gicsSubIndustry: row.gicsSubIndustry ?? undefined,
+      longBusinessSummary: row.longBusinessSummary ?? undefined,
       // dayChangePct: not stored in v2 — would come from a live provider
       fetchedAt,
       snapshotDate: active.snapshotDate,

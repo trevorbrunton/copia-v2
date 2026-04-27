@@ -80,6 +80,23 @@ export function StockFactPanel({ ticker, onClose }: StockFactPanelProps) {
                   {fact.companyName}
                 </span>
               </div>
+              {/* Sector + sub-industry badges. Both pulled from the
+                  enriched top-500 projection — stocks outside that
+                  projection won't have them, so render conditionally. */}
+              {(fact.sector || fact.gicsSubIndustry) ? (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {fact.sector ? (
+                    <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-200 ring-1 ring-sky-400/25">
+                      {fact.sector}
+                    </span>
+                  ) : null}
+                  {fact.gicsSubIndustry ? (
+                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-white/70 ring-1 ring-white/10">
+                      {fact.gicsSubIndustry}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
                 <div>
                   <dt className="text-xs text-white/40">Share price</dt>
@@ -94,6 +111,19 @@ export function StockFactPanel({ ticker, onClose }: StockFactPanelProps) {
                   <dd className="text-white/85">{fact.earningsStatus ?? "—"}</dd>
                 </div>
               </dl>
+              {/* Plain-English company description from the enriched
+                  feed. Capped at ~4 lines via line-clamp so the panel
+                  doesn't push the rest of the page off-screen — full
+                  text remains in the title attribute on hover for the
+                  curious. */}
+              {fact.longBusinessSummary ? (
+                <p
+                  title={fact.longBusinessSummary}
+                  className="mt-2 line-clamp-4 text-xs leading-relaxed text-white/65"
+                >
+                  {fact.longBusinessSummary}
+                </p>
+              ) : null}
               <div className="mt-3 flex items-center gap-2">
                 <SourceBadge
                   snapshot={{ date: fact.snapshotDate, collectedAt: fact.fetchedAt }}

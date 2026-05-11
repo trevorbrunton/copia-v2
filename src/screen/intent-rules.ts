@@ -74,6 +74,37 @@ const CATEGORY_PATTERNS: Array<[RegExp, CategoryId]> = [
   ],
   [/\btax(?:es|ation)?\b|\bAMIT\b/i, "tax"],
   [/\bESG\b|\benvironmental.*social\b|\bethical\b|\bsustainabilit/i, "esg"],
+  // Monthly commentary sits BEFORE `performance` so phrases that combine
+  // both ("what drove the performance", "monthly performance review")
+  // route to the recent narrative rather than the bare-numbers answer.
+  [
+    /\b(?:monthly\s+(?:commentary|update|review)|recent\s+(?:commentary|update|review)|what\s+drove|what(?:'s|\s+is)\s+(?:happened|been\s+going\s+on)|contributors?|detractors?|latest\s+(?:commentary|update|review))\b/i,
+    "monthly_commentary",
+  ],
+  // Top holdings sits BEFORE `performance` so "top stocks" / "biggest
+  // positions" don't accidentally hit the generic performance row.
+  // The "what does X own/hold" alt allows a short noun-phrase between
+  // the verb and the object so "what does the micro-cap fund own" lands
+  // here without needing literal "the fund".
+  [
+    /\btop\s+(?:five|5|10|ten)?\s*(?:holdings?|stocks?|positions?|names?)\b|\bbiggest\s+(?:positions?|holdings?|stocks?)\b|\bwhat\s+(?:does|do)\b[^.!?]{0,40}\b(?:own|hold)\b|\bmain\s+(?:positions?|holdings?)\b/i,
+    "top_holdings",
+  ],
+  // Market outlook — "view on the market", "macro view", "outlook".
+  [
+    /\b(?:market\s+)?outlook\b|\b(?:market|macro|economic)\s+view\b|\bview\s+on\s+(?:the\s+)?(?:market|economy|outlook|macro)\b|\bwhat'?s?\s+your\s+(?:market\s+)?view\b/i,
+    "market_outlook",
+  ],
+  // Ratings + awards (Lonsec / Zenith / Morningstar).
+  [
+    /\b(?:lonsec|zenith|morningstar|highly\s+recommended|platinum\s+rated|fund\s+manager\s+of\s+the\s+year)\b|\bratings?\b|\bawards?\b|\bfinalist\b/i,
+    "ratings",
+  ],
+  // Platform availability.
+  [
+    /\bplatforms?\b|\b(?:where|how)\s+can\s+i\s+(?:get|buy|invest|access|find)\b|\bavailable\s+(?:on|through)\b|\blisted\s+(?:on|through)\b|\b(?:hub24|netwealth|macquarie\s+wrap|cfs\s+first|amp\s+mynorth|asgard|bt\s+panorama|insignia|praemium|dash)\b/i,
+    "platforms",
+  ],
   [/\bperformance\b|\breturns?\b|\bhow\s+(?:has|did|is)\s+.*perform/i, "performance"],
   [/\bobjective\b|\btarget\s+return\b|\baims?\s+to\b|\bgoal\b|\boutperform/i, "investment_objective"],
   [

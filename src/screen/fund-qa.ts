@@ -40,6 +40,15 @@ export const CATEGORY_IDS = [
   "tax",
   "esg",
   "performance",
+  // Added 2026-05 from the April monthly fund updates. Sit at the
+  // tail so existing intent-rule ordering for "performance" / generic
+  // catch-alls isn't disturbed; new rule patterns are added explicitly
+  // in intent-rules.ts where precedence matters.
+  "top_holdings",
+  "monthly_commentary",
+  "market_outlook",
+  "ratings",
+  "platforms",
 ] as const;
 export type CategoryId = (typeof CATEGORY_IDS)[number];
 

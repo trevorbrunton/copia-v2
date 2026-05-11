@@ -1,6 +1,6 @@
 {
-  "_comment": "Fund Q&A bank for the Pep multi-fund mode. Source documents in docs/fund-data/. Manually curated — review against PDFs before pitch. Keep answers short (1-3 sentences) since Pep reads them aloud.",
-  "lastUpdated": "2026-04-26",
+  "_comment": "Fund Q&A bank for the Pep multi-fund mode. Source documents in docs/fund-data/ (PDS + CFS factsheet + Apr26 monthly fund updates). Manually curated — review against PDFs before pitch. Keep answers short (1-3 sentences) since Pep reads them aloud.",
+  "lastUpdated": "2026-05-11",
   "categoryLabels": {
     "fund_overview": "Fund overview",
     "investment_objective": "Investment objective",
@@ -22,7 +22,12 @@
     "how_to_apply": "How to apply",
     "tax": "Tax treatment",
     "esg": "ESG considerations",
-    "performance": "Recent performance"
+    "performance": "Recent performance",
+    "top_holdings": "Top 5 holdings",
+    "monthly_commentary": "Monthly commentary",
+    "market_outlook": "Market outlook",
+    "ratings": "Ratings and awards",
+    "platforms": "Platform availability"
   },
   "funds": {
     "mid_cap": {
@@ -52,7 +57,12 @@
         "how_to_apply": "Direct investors can apply online at OC Mid-Cap Fund Online Application or by submitting a paper form. Indirect investors apply through their platform operator. Applications received by 2pm AEST on a business day are processed at that day's entry price.",
         "tax": "The Fund has elected to be an Attribution Managed Investment Trust from the 2024 financial year, so it does not pay tax on behalf of resident investors. Investors include their attributed share of the Fund's net taxable income — disclosed on an AMMA statement issued after year-end — in their assessable income. Investors should consult their own tax adviser.",
         "esg": "The responsible entity does not take ESG considerations into account when making investment decisions. The Investment Manager may take ESG factors into account at its discretion where relevant to the financial performance of the investment, but does not have a predetermined view.",
-        "performance": "Current performance figures are published on the OC Funds website. Past performance is not a reliable indicator of future performance."
+        "performance": "As at 30 April 2026 the OC Mid-Cap Fund returned 5.3% for the month and 2.3% for the year, with the S&P/ASX MidCap 50 Accumulation Index returning 2.8% and 9.8% respectively. Since inception in November 2023 the fund has returned 6.7% per annum versus the benchmark's 11.4%. Past performance is not a reliable indicator of future performance.",
+        "top_holdings": "The fund's top five holdings as at April 2026, in alphabetical order, are ALS Limited (ALQ), Mineral Resources (MIN), NEXTDC (NXT), Orica (ORI), and REA Group (REA). The top five may not be representative of current or future investments.",
+        "monthly_commentary": "In April 2026 the OC Mid-Cap Fund returned 5.3%, outperforming the benchmark by 2.5%. Key contributors were ZIP Co up 56.8% on improving US bad debt trends, NEXTDC up 27.8% after a major 250 megawatt contract win and a $1.5 billion equity raise, and Mineral Resources up 18.8% as iron ore, lithium, and mining services guidance was lifted.",
+        "market_outlook": "The April US-Iran ceasefire has brought some calm to global markets but the situation remains tenuous. The RBA is expected to deliver further rate hikes in May and August, taking the cash rate toward 4.8%, with the Australian economy facing sub-trend growth. We've pared back domestic consumer exposure but expect attractive opportunities to emerge as the market prices in bearish outcomes. The recent sell-off in domestic mid-cap industrials creates opportunities — our universe is now populated with quality businesses trading at materially more attractive prices.",
+        "ratings": "The OC Mid-Cap Fund holds a 5-Star Highly Recommended rating from Lonsec (October 2025) and a Recommended rating from Zenith Investment Partners (February 2025).",
+        "platforms": "The OC Mid-Cap Fund is currently available on the HUB24 platform."
       }
     },
     "micro_cap": {
@@ -82,7 +92,12 @@
         "how_to_apply": "Apply by completing the OC Micro-Cap Fund Application Form attached to the PDS, or via online application. Applications received and accepted by 2pm Melbourne time are processed at that day's entry price. Indirect investors apply through their platform operator.",
         "tax": "The Fund is a registered managed investment scheme that does not generally pay tax on behalf of resident investors. Investors include their attributed share of the Fund's net taxable income in their assessable income each year. Investors should consult their own tax adviser.",
         "esg": "Labour standards and environmental, social and ethical considerations are taken into account when making investment decisions for the Fund.",
-        "performance": "Current performance figures are published on the OC Funds website. Past performance is not a reliable indicator of future performance."
+        "performance": "As at 30 April 2026 the OC Micro-Cap Fund returned 2.2% for the month and 24.0% for the year — ahead of the S&P/ASX Small Ordinaries at 15.3% but behind the Emerging Companies index at 38.4%. Over ten years the fund has averaged 12.2% per annum, and since inception in November 2003 the fund has returned 12.4% per annum versus the Emerging Companies benchmark's 7.1%. Past performance is not a reliable indicator of future performance.",
+        "top_holdings": "The fund's top five holdings as at April 2026, in alphabetical order, are Acusensus (ACE), Forrestania Resources (FRS), GenusPlus Group (GNP), Monash IVF Group (MVF), and Viva Leisure (VVA). The top five may not be representative of current or future investments.",
+        "monthly_commentary": "In April 2026 the OC Micro-Cap Fund returned 2.2%, with the fund up 24% over the past twelve months. Key contributors were GenusPlus Group up 30.3% on a $110 million contract win for the Koolunga battery storage project, and Mayfield Group up 24.9% on energy transition exposure. Smart Parking detracted, down 16.5% on concerns about Middle East tensions affecting UK parking volumes.",
+        "market_outlook": "The April US-Iran ceasefire has brought some calm to global markets but the situation remains tenuous. The RBA is expected to deliver further rate hikes in May and August, taking the cash rate toward 4.8%, with the Australian economy facing sub-trend growth. We've pared back domestic consumer exposure but expect attractive opportunities to emerge. The recent sell-off in domestic micro-cap industrials creates opportunities — our universe is now populated with quality businesses trading at materially more attractive prices.",
+        "ratings": "The OC Micro-Cap Fund holds a Recommended rating from Lonsec (October 2025) and a Recommended rating from Zenith Investment Partners (February 2025). The fund was a Money Management Fund Manager of the Year finalist in 2020 and 2021, and a Financial Standard Awards Small Cap finalist in 2022.",
+        "platforms": "The OC Micro-Cap Fund is available on a wide range of platforms including AMP MyNorth, BT Panorama, CFS First Wrap, HUB24, Insignia Expand, Xplore Linear, Macquarie, Netwealth, Powerwrap, Praemium, DASH, and Mason Stevens."
       }
     },
     "premium_small": {
@@ -112,7 +127,12 @@
         "how_to_apply": "Apply directly via Copia or through a platform such as Colonial First State FirstChoice. Refer to the relevant PDS and Financial Services Guide before investing.",
         "tax": "Investing in a registered managed investment scheme is likely to have tax consequences. Investors include their share of the Fund's distributed income in their assessable income each year. Investors should seek professional tax advice.",
         "esg": "Refer to the latest PDS for the Fund's current ESG considerations and any labour standards or environmental, social or ethical factors taken into account in investment decisions.",
-        "performance": "Per the CFS factsheet dated January 2026: the Fund returned 7.02% per annum over three years and 5.20% per annum over five years (Investments option). Since inception in May 2015, returns are 7.57% per annum, versus the benchmark of 11.28% per annum. Past performance is not an indicator of future performance."
+        "performance": "As at 30 April 2026 the OC Premium Small Companies Fund returned 7.9% for the month and 5.7% for the year, with the S&P/ASX Small Ordinaries at 3.3% and 15.3% respectively. Since inception in December 2000 the fund has returned 9.5% per annum versus 6.0% for the Small Ordinaries and 5.5% for the Small Industrials — outperformance of 3.5 and 4.0% per annum respectively. Past performance is not a reliable indicator of future performance.",
+        "top_holdings": "The fund's top five holdings as at April 2026, in alphabetical order, are Breville Group (BRG), GenusPlus Group (GNP), Kelsian Group (KLS), Tuas (TUA), and ZIP Co (ZIP). The top five may not be representative of current or future investments.",
+        "monthly_commentary": "In April 2026 the OC Premium Small Companies Fund returned 7.9%, outperforming the Small Ordinaries by 4.6%. Key contributors were ZIP Co up 56.8% on improving US bad debt trends, and Codan up 33.3% after upgrading FY26 guidance with EBIT and net profit both expected up more than 60%. Pexa Group detracted, down 17.5% on regulatory concerns around the Interoperability Program decision.",
+        "market_outlook": "The April US-Iran ceasefire has brought some calm to global markets but the situation remains tenuous. The RBA is expected to deliver further rate hikes in May and August, taking the cash rate toward 4.8%, with the Australian economy facing sub-trend growth. We've pared back domestic consumer exposure but expect attractive opportunities to emerge. The recent sell-off in domestic small-cap industrials creates opportunities — our universe is now populated with quality businesses trading at materially more attractive prices.",
+        "ratings": "The OC Premium Small Companies Fund is the highest-rated fund in the OC range — Lonsec Platinum rated for five consecutive years from 2020 to 2024 and currently Highly Recommended. Zenith rates the fund Recommended. The fund won Money Management's Australian Fund Manager of the Year in 2024 and was a Morningstar Awards finalist in 2023.",
+        "platforms": "The OC Premium Small Companies Fund is available on a wide range of platforms including AMP MyNorth, Grow Wrap, Asgard, BT Panorama, CFS First Choice and First Wrap, HUB24, Insignia Expand, Xplore Linear, Macquarie, MLC Navigator, Netwealth, OneVue, Powerwrap, Praemium, DASH, and Mason Stevens."
       }
     }
   }

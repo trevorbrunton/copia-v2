@@ -141,6 +141,19 @@ const fundCases: FundCase[] = [
   { utterance: "What's the cooling-off period for the small companies fund", fundId: "premium_small", category: "cooling_off" },
   { utterance: "What's the tax treatment of the mid-cap fund", fundId: "mid_cap", category: "tax" },
   { utterance: "How has the small companies fund performed", fundId: "premium_small", category: "performance" },
+  // ─── Monthly-update categories (added 2026-05) ─────────
+  { utterance: "What are the top holdings of the mid-cap fund", fundId: "mid_cap", category: "top_holdings" },
+  { utterance: "What does the micro-cap fund own", fundId: "micro_cap", category: "top_holdings" },
+  { utterance: "What are the biggest positions in the small companies fund", fundId: "premium_small", category: "top_holdings" },
+  { utterance: "What's the latest commentary on the mid-cap fund", fundId: "mid_cap", category: "monthly_commentary" },
+  { utterance: "What drove the micro-cap fund's performance", fundId: "micro_cap", category: "monthly_commentary" },
+  { utterance: "Who were the contributors in the small companies fund", fundId: "premium_small", category: "monthly_commentary" },
+  { utterance: "What's the market outlook for the mid-cap fund", fundId: "mid_cap", category: "market_outlook" },
+  { utterance: "What's your macro view on the small companies fund", fundId: "premium_small", category: "market_outlook" },
+  { utterance: "What's the Lonsec rating of the mid-cap fund", fundId: "mid_cap", category: "ratings" },
+  { utterance: "Has the micro-cap fund won any awards", fundId: "micro_cap", category: "ratings" },
+  { utterance: "What platforms is the mid-cap fund on", fundId: "mid_cap", category: "platforms" },
+  { utterance: "Where can I buy the small companies fund", fundId: "premium_small", category: "platforms" },
 ];
 
 describe("matchIntentRule", () => {

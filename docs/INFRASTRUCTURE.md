@@ -1,265 +1,467 @@
 # Infrastructure
 
-External services, environment variables, database, and deployment configuration for the **Pep Avatar v2** demo.
+Infrastructure, environment, deployment, and operational guidance for the current **Pep Avatar v2** codebase and the target production platform.
 
 **Companion documents:**
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — code structure, data flows, layered patterns.
-- [PROCESSING-STREAMS.md](./PROCESSING-STREAMS.md) — every concurrent processing stream and when each is active.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — current and target system design.
+- [PROCESSING-STREAMS.md](./PROCESSING-STREAMS.md) — current background and concurrent flows.
+- [plans/production-modernization-plan.md](./plans/production-modernization-plan.md) — phased execution plan.
 
 ---
 
-## Service map
+## 1. Infrastructure Overview
 
-| Service | Purpose | Wire | Where called from |
-|---|---|---|---|
-| **Supabase Postgres** | Snapshot store + user data | `postgres-js` over pgbouncer | `src/db/index.ts`, all server routes |
-| **Supabase Auth** | Email/password login (dashboard only) | `@supabase/ssr` cookies | `src/auth/`, `src/lib/supabase/` |
-| **Tavus CVI** | Streaming avatar (face + lip-sync) | REST + Daily.co WebRTC | `app/api/v1/demo/tavus/*`, `src/demo/use-tavus-avatar.ts` |
-| **ElevenLabs** | STT (`scribe_v1`) + persona-side TTS (`eleven_turbo_v2_5`) | REST | `src/screen/stt.ts`; **TTS runs server-side on Tavus's persona**, not in our code |
-| **Anthropic** | Claude Haiku intent-classifier fallback | REST (no SDK) | `src/screen/screen-matcher.ts` |
-| **Vercel** (assumed) | Hosting | — | All Next.js routes |
+The current codebase is deployed as a Next.js application with external API dependencies and a Supabase-backed Postgres database. It is sufficient for a demo or pilot, but the target production product requires a clearer split between:
 
----
+- **runtime infrastructure** for live voice turns
+- **authoring infrastructure** for document ingestion and editorial workflows
 
-## Environment variables
+The production goal is not immediate microservices. The recommended path is a **modular monolith plus managed infrastructure primitives**:
 
-All variables and what they control. Cross-reference with `.env.example` (kept in lockstep with this list).
-
-### Database — fatal if unset (validated at startup by `instrumentation.ts`)
-
-| Var | Where | Notes |
-|---|---|---|
-| `DATABASE_URL` | server | Pooled Supabase connection (port 6543). Required. |
-| `DIRECT_URL` | server | Direct connection (port 5432). Used by `bun scripts/run-migration.ts` and Drizzle Kit migrations. |
-
-### Supabase Auth — warn-only (auth UI fails without them; demo path unaffected)
-
-| Var | Where | Notes |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | client + server | `https://<project-ref>.supabase.co`. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | client + server | Anon key. Safe to expose. |
-| `SUPABASE_SERVICE_ROLE_KEY` | server | Service-role key. Used by the admin Supabase client (`src/lib/supabase/admin.ts`); never sent to the browser. |
-
-### Tavus CVI — warn-only
-
-| Var | Where | Notes |
-|---|---|---|
-| `TAVUS_API_KEY` | server | Used by `app/api/v1/demo/tavus/*` for conversation create + DELETE. |
-| `TAVUS_REPLICA_ID` | server | Optional override; absent → Tavus uses the persona's `default_replica_id`. |
-| `NEXT_PUBLIC_TAVUS_PERSONA_ID` | client | The Pep persona id passed to `POST /api/v1/demo/tavus`. **Must be a `pipeline_mode: "echo"` persona with `tts_engine: "elevenlabs"`** — see [TAVUS-PERSONA-SETUP.md](./TAVUS-PERSONA-SETUP.md). |
-
-### ElevenLabs — warn-only
-
-| Var | Where | Notes |
-|---|---|---|
-| `ELEVENLABS_API_KEY` | server + persona | Used by `src/screen/stt.ts` for STT. **A copy of this key is also stored on the Tavus persona's TTS layer server-side**; Tavus uses that copy to render Pep's voice. Same key, two places. |
-| `ELEVENLABS_VOICE_ID` | setup-only | Voice id (e.g. a Voice Lab clone). Not read at runtime; consumed by `bun scripts/create-tavus-echo-persona.ts` and the `PATCH /v2/personas/<id>` setup step. |
-
-### Anthropic — warn-only
-
-| Var | Where | Notes |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | server | Used by the classifier fallback. Without it the matcher silently degrades to `{ kind: "fallback" }`. |
-| `ANTHROPIC_MODEL_ID` | server | Optional override; default `claude-haiku-4-5-20251001`. |
-
-### App configuration
-
-| Var | Where | Notes |
-|---|---|---|
-| `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS` | client | Voice-activity-detection silence threshold for `useVoiceListener`. Default `1000`. |
-| `LOG_LEVEL` | server | `debug | info | warn | error`. Default `info`. |
-| `NODE_ENV` | server | Standard Next.js. Toggles human-readable vs JSON log output. |
+- Postgres
+- object storage
+- background jobs / queue
+- cache
+- observability
 
 ---
 
-## Database
+## 2. Current Service Map
 
-Two Drizzle schema files, bundled by `src/db/index.ts`.
-
-### `src/db/schema.ts` — user / session tables
-
-| Table | Purpose | Notes |
+| Service | Current purpose | Current integration point |
 |---|---|---|
-| `users` | Profile (name, email, avatar URL, status, login counters) | RLS via `auth.uid() = supabase_id`. |
-| `user_status_history` | Audit log for every `active ↔ suspended ↔ soft_deleted` transition | Append-only; written by `user-lifecycle-service`. |
-| `user_devices` | Device fingerprint + last-seen | Joined onto sessions. |
-| `user_sessions` | Per-login row with heartbeat timestamps | Heartbeat every 15 min; 30-day TTL; persisted in `localStorage` so sessions survive refresh. |
-| `demo_responses` *(orphan)* | v1 Q&A response set | **Read by a separate v1 app that still runs.** v2 doesn't query these but the Drizzle exports stay so `drizzle-kit generate` doesn't emit a `DROP TABLE` migration against the shared DB. |
-| `demo_question_patterns` *(orphan)* | v1 question patterns | Same orphan rationale. |
+| **Supabase Postgres** | user/session data and screening snapshot data | `src/db/index.ts`, server routes |
+| **Supabase Auth** | authenticated dashboard and settings shell | `src/auth/*`, `src/lib/supabase/*` |
+| **Tavus CVI** | streaming avatar session lifecycle | `app/api/v1/demo/tavus/*`, `src/demo/use-tavus-avatar.ts` |
+| **Daily.co** | WebRTC transport under Tavus | client-side via `@daily-co/daily-js` |
+| **ElevenLabs** | speech-to-text and Tavus-side TTS voice | `src/screen/stt.ts`, Tavus persona config |
+| **Anthropic** | fallback intent classification | `src/screen/screen-matcher.ts` |
+| **Vercel** (assumed host) | hosting for Next.js application | app/router deployment target |
 
-### `src/db/screen-schema.ts` — screening tables
+---
 
-| Table | Purpose | Notes |
+## 3. Current Platform Characteristics
+
+### 3.1 Application host
+
+Current assumptions in the code and docs point to a Vercel-style deployment:
+
+- Next.js App Router
+- Node serverless functions
+- edge caching for selected GET routes
+- environment variables managed at deploy time
+
+Nothing in the application strictly requires Vercel, but the current behavior assumes a serverless Node environment rather than a long-lived custom app server.
+
+### 3.2 Current runtime execution model
+
+The current public runtime path is:
+
+- client-owned VAD and audio buffering
+- one server call for STT/classification
+- optional additional server calls for filters/facts/overlap
+- client-owned narration dispatch to Tavus
+
+That keeps the deployment simple, but it also means browser behavior materially affects correctness.
+
+### 3.3 Current operational risks
+
+The current stack still has several demo-era operational constraints:
+
+- in-memory rate limiting is single-process only
+- snapshot cache is in-process only
+- curated Q&A corpus is static JSON in the repo
+- integration tests can accidentally depend on live DB reachability
+- no background-job substrate exists yet for authoring workflows
+
+---
+
+## 4. Target Production Infrastructure Model
+
+## 4.1 Runtime plane
+
+Runtime infrastructure should support:
+
+- low-latency synchronous turn handling
+- cache-backed approved corpus lookup
+- session and telemetry persistence
+- predictable integration with Tavus, ElevenLabs, and the classifier
+
+Suggested runtime building blocks:
+
+- Next.js API route or dedicated runtime service entrypoint
+- Postgres for durable system state
+- Redis for distributed cache and rate limiting
+- object storage only for audio artifacts if retention is needed
+- observability stack for traces, metrics, and logs
+
+## 4.2 Authoring plane
+
+Authoring infrastructure should support:
+
+- document upload and immutable version storage
+- text extraction
+- draft generation jobs
+- editorial review workflows
+- corpus publish and rollback
+
+Suggested authoring building blocks:
+
+- same monolith application for admin UI and APIs
+- background job queue
+- worker processes
+- object storage for source documents
+- Postgres for metadata and editorial state
+
+---
+
+## 5. Environment Variables
+
+This section reflects the current codebase and indicates where production expansion is expected.
+
+### 5.1 Current database variables
+
+| Variable | Scope | Current use |
 |---|---|---|
-| `asx_snapshots` | One row per ingested ASX snapshot (date, count, collected_at) | Active snapshot = `MAX(collected_at)`, tiebreak by `id`. |
-| `asx_securities` | One row per security per snapshot | Wide projection: ticker, sector, GICS, mcap, turnover, profitability flags, curated demo flags (`is_unproven_or_complex_tech`, `is_single_commodity_or_single_mine`, `is_asx_100`), full `data_quality` JSON. |
-| `oc_holdings` | Sample portfolio for the Q8 portfolio-overlap intent | Seeded with 10 supplied holdings flagged `is_sample = true`. |
+| `DATABASE_URL` | server | pooled application DB connection |
+| `DIRECT_URL` | server | direct connection for migrations/scripts |
 
-### Static Q&A banks (no DB)
+### 5.2 Current auth variables
 
-The non-screening modes are backed by version-controlled JSON files, not Postgres rows. Each ships with a typed loader (`src/screen/fund-qa.ts`, `src/screen/process-qa.ts`) that runs a bidirectional drift assertion at module load.
-
-| File | Shape | Source documents |
+| Variable | Scope | Current use |
 |---|---|---|
-| `data/fund-qa.json` | 3 funds × 21 categories of curated answers | OC fund PDS PDFs (extracted in `docs/fund-data/`) |
-| `data/process-qa.json` | 12 topics of curated answers about OC's investment process | `docs/plans/OC_Prem_Dyn_-_FSC_Questionnaire_0625.txt` (FSC §1.1–1.5 + §2.1–2.19) |
+| `NEXT_PUBLIC_SUPABASE_URL` | client + server | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | client + server | public auth key |
+| `SUPABASE_SERVICE_ROLE_KEY` | server | admin Supabase client |
 
-Updating an answer means editing the JSON and redeploying — no migration, no ingest. Adding a new fund / category / topic requires a paired edit to the loader's TypeScript union; the module-load assertion fails the dev server immediately if the two drift.
+### 5.3 Current Tavus variables
 
-Snapshot ingest is a one-shot script:
-
-```bash
-# Plain run (validates fixture, then upserts)
-bun scripts/ingest-asx-snapshot.ts data/snapshots/2026-04-XX.json
-
-# Re-baseline if the input fixture has intentionally changed
-bun scripts/ingest-asx-snapshot.ts data/snapshots/2026-04-XX.json --baseline
-```
-
-The script computes filter outputs first, validates them against `tests/screen/expected-preset-counts.json`, and **only then** writes to Postgres. Drift exits 2 without touching the DB.
-
----
-
-## API endpoints
-
-### Public demo (unauthenticated, rate-limited)
-
-| Method + Path | Purpose |
-|---|---|
-| `GET /api/v1/screen/snapshot` | Active snapshot meta + securities (read from in-process cache; `Cache-Control` for edge fronting) |
-| `POST /api/v1/screen/apply-filter` | Stateless single-filter step over an optional ticker subset |
-| `POST /api/v1/screen/stock-fact` | Resolve ticker / company name → snapshot field (price, market cap, earnings status) |
-| `POST /api/v1/screen/portfolio-overlap` | Q8 holdings overlap |
-| `POST /api/v1/screen/process` | STT (multipart audio) → matcher → intent. Rate-limited 30/min, 200/hour |
-| `POST /api/v1/demo/tavus` | Create a Tavus conversation. Rate-limited 5/min, 20/hour |
-| `DELETE /api/v1/demo/tavus/[conversationId]` | End a Tavus conversation. Rate-limited 30/min, 100/hour |
-
-`next.config.ts` rewrites `/api/user/*` → `/api/v1/user/*` and `/api/demo/*` → `/api/v1/demo/*` so older client code paths keep working.
-
-### Authenticated dashboard
-
-| Method + Path | Purpose |
-|---|---|
-| `GET /api/v1/user` | Current user's profile |
-| `PATCH /api/v1/user` | Update profile |
-| `DELETE /api/v1/user/account` | Self-service soft delete |
-| `GET /api/v1/user/sessions` | List current user's sessions |
-| `POST /api/v1/user/sessions` | Create / record a new session (called on login + heartbeat) |
-| `DELETE /api/v1/user/sessions/[id]` | Revoke a session |
-| `GET /api/v1/user/devices` | List devices |
-| `DELETE /api/v1/user/devices/[id]` | Remove a device |
-| `GET /api/v1/user/login-history` | Login audit log |
-
-All authenticated routes resolve `AuthContext` via cookie (web) or `Authorization: Bearer <token>` (mobile-ready).
-
----
-
-## Deployment (Vercel)
-
-The app is targeted at Vercel; nothing is Vercel-specific so other Node-serverless hosts work.
-
-### Vercel project setup
-
-1. **Connect** the GitHub repo.
-2. **Framework preset:** Next.js — Vercel auto-detects Next 16.
-3. **Build command:** default (`next build`).
-4. **Root directory:** project root.
-5. **Environment variables:** mirror `.env.example` into the Vercel dashboard. The startup `validateEnv()` will warn in build / serverless cold-start logs if anything required is missing.
-6. **Edge caching:** the `/api/v1/screen/snapshot` route ships with `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=3600`, so Vercel's edge fronts repeat sessions across instances without further config.
-
-### Post-deploy persona setup
-
-The Tavus persona must exist and be configured for ElevenLabs TTS in your cloned voice. Run the setup steps in [TAVUS-PERSONA-SETUP.md](./TAVUS-PERSONA-SETUP.md):
-
-```bash
-# 1. Create an echo-mode persona shell
-bun scripts/create-tavus-echo-persona.ts --name "Pep" --replica-id <replica id>
-
-# 2. Patch its TTS layer to use ElevenLabs + your voice + your key
-curl -X PATCH https://tavusapi.com/v2/personas/<persona id> \
-  -H "x-api-key: $TAVUS_API_KEY" -H "Content-Type: application/json" \
-  -d "[
-    {\"op\":\"replace\",\"path\":\"/layers/tts/tts_engine\",\"value\":\"elevenlabs\"},
-    {\"op\":\"replace\",\"path\":\"/layers/tts/external_voice_id\",\"value\":\"$ELEVENLABS_VOICE_ID\"},
-    {\"op\":\"replace\",\"path\":\"/layers/tts/api_key\",\"value\":\"$ELEVENLABS_API_KEY\"},
-    {\"op\":\"replace\",\"path\":\"/layers/tts/tts_model_name\",\"value\":\"eleven_turbo_v2_5\"},
-    {\"op\":\"replace\",\"path\":\"/layers/tts/voice_settings\",\"value\":{\"stability\":0.5,\"similarity_boost\":0.75}}
-  ]"
-
-# 3. Set NEXT_PUBLIC_TAVUS_PERSONA_ID=<persona id> in .env.local and Vercel
-```
-
----
-
-## Cost notes (rough, per pitch session)
-
-A 30-minute session with ~50 utterances averaging 100 chars, ~60 voice questions averaging 3 s of audio:
-
-| Service | Unit rate (Apr 2026) | Per-session cost |
+| Variable | Scope | Current use |
 |---|---|---|
-| Tavus CVI | ~$0.10 / minute on standard plans | ~$3.00 |
-| ElevenLabs STT (`scribe_v1`) | ~$0.30 / hour of audio | ~$0.05 |
-| ElevenLabs TTS (`eleven_turbo_v2_5`) | ~$0.30 / 1 K chars on Creator | ~$1.50 |
-| Anthropic (Claude Haiku) | ~$0.80 / 1 M input tokens, ~$4 / 1 M output | ~$0.10 (most utterances hit the rule layer) |
-| Supabase | Free tier covers demo | ~$0 |
-| **Total** | | **~$4.65** |
+| `TAVUS_API_KEY` | server | Tavus conversation create/delete |
+| `TAVUS_REPLICA_ID` | server | optional replica override |
+| `NEXT_PUBLIC_TAVUS_PERSONA_ID` | client | persona used by the demo runtime |
 
-These are demo-budget; if the system goes to broader pilot the rate-limit ceilings (`30/min`, `200/hour` per IP for `/screen/process`) cap the worst-case spend per attacker IP at roughly $1 of paid services per hour even before account-wide quotas kick in.
+### 5.4 Current ElevenLabs variables
 
----
-
-## Local development
-
-```bash
-bun install
-cp .env.example .env.local        # then fill in the values
-bun run db:migrate                # Drizzle Kit migrations
-bun scripts/ingest-asx-snapshot.ts data/snapshots/<file>.json   # one-shot ingest
-bun dev                            # http://localhost:3000
-```
-
-`bun dev` forwards browser `console.warn` lines to the terminal as `[browser] …` lines. Useful for the diagnostic logs in `useTavusAvatar` (`[tavus] event: conversation.X` traces every CVI app-message Tavus dispatches).
-
-### Useful scripts
-
-```bash
-bun run lint                    # ESLint
-bunx tsc --noEmit               # Strict TypeScript check
-bun run test                    # Vitest (197 cases across 9 files)
-bun run db:generate             # Generate Drizzle migration from schema diff
-bun run db:push                 # Push schema to Supabase (be careful in prod)
-bun run db:studio               # Drizzle Studio
-```
-
-### Resetting a development snapshot
-
-```bash
-# Re-run ingest with an updated fixture (validates first, then writes)
-bun scripts/ingest-asx-snapshot.ts data/snapshots/2026-04-XX.json --baseline
-```
-
-The in-process snapshot cache TTL is 60 s; restart `bun dev` if you need an immediate refresh after re-ingesting.
-
----
-
-## Service-specific failure modes (and what to do)
-
-| Symptom | Likely cause | Mitigation |
+| Variable | Scope | Current use |
 |---|---|---|
-| `503` from Tavus on conversation create | Tavus quota exhausted or `TAVUS_API_KEY` rotated | Check `validateEnv()` warnings; rotate key in Vercel env |
-| Pep speaks the wrong voice | Persona's TTS layer reverted (e.g. someone re-PATCHed it) | `curl https://tavusapi.com/v2/personas/<id> -H "x-api-key: $TAVUS_API_KEY" \| jq '.layers.tts'` — confirm `tts_engine: "elevenlabs"` and your `external_voice_id` |
-| Pep's lip-sync is off but voice is right | WebRTC connection blip | Hook auto-reconnects once on disconnect; if it persists, hit Reset on the demo |
-| `429` from `/api/v1/screen/process` | IP rate limit hit | `Retry-After` header tells the client when capacity returns. Limits are 30/min, 200/hour |
-| STT timeouts | ElevenLabs slow or cold | 12 s upstream timeout fails fast; user sees a retry hint, no demo freeze |
-| Cartesia voice during demo | Persona was reset to default Cartesia engine. Or fell back from broken Audio Echo | Re-run the persona PATCH from the Deployment section above |
-| Snapshot row counts off | Stale fixture | Re-ingest with `--baseline` after confirming source data |
-| Repeated 502s on `/api/v1/screen/*` | Database unreachable | `validateEnv()` would have flagged `DATABASE_URL`; check Supabase project status |
+| `ELEVENLABS_API_KEY` | server | STT in `src/screen/stt.ts` |
+| `ELEVENLABS_VOICE_ID` | setup-only | persona provisioning script / Tavus persona patching |
+
+### 5.5 Current classifier variables
+
+| Variable | Scope | Current use |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | server | fallback classifier |
+| `ANTHROPIC_MODEL_ID` | server | optional classifier model override |
+
+### 5.6 Current app configuration
+
+| Variable | Scope | Current use |
+|---|---|---|
+| `NEXT_PUBLIC_VAD_SILENCE_TIMEOUT_MS` | client | client-side silence timeout for VAD |
+| `LOG_LEVEL` | server | logger threshold |
+| `NODE_ENV` | server | standard environment mode |
+
+### 5.7 Target production additions
+
+The production product will likely require additional variables such as:
+
+| Variable | Scope | Purpose |
+|---|---|---|
+| `REDIS_URL` | server/worker | distributed cache and rate limiting |
+| `QUEUE_URL` or vendor-specific queue vars | worker | background jobs |
+| `DOCUMENT_STORAGE_BUCKET` | server/worker | source document storage |
+| `DOCUMENT_STORAGE_REGION` | server/worker | object storage region |
+| `RUNTIME_CORPUS_CACHE_KEY` | server | active published corpus coordination |
+| `OBSERVABILITY_DSN` | server/worker | error and trace export |
+| `TURN_AUDIO_RETENTION_ENABLED` | server | whether audio artifacts are retained |
+
+These are not yet implemented in code and should be introduced alongside the relevant phases.
 
 ---
 
-## What is *not* in production scope
+## 6. Current Data Storage
 
-- Live ASX market-data integration. Snapshot-only by design (see plan §12 D3).
-- Email / monitoring infrastructure for Q7. The "daily monitoring" intent is a demo workflow only.
-- Admin tooling for managing the screening criteria. Curated flags are hand-maintained in `data/curation.json` and re-applied by re-ingesting.
-- Horizontal-scale rate limiting. The in-memory limiter is single-process. Move to Redis / Vercel edge limit if traffic grows beyond demo.
+### 6.1 Current Postgres usage
+
+Current Postgres tables fall into two groups:
+
+- user/auth/session tables in `src/db/schema.ts`
+- screening snapshot / holdings tables in `src/db/screen-schema.ts`
+
+The current curated Q&A corpus does **not** live in Postgres. It lives in:
+
+- `data/fund-qa.json`
+- `data/process-qa.json`
+
+That is appropriate for the current demo, but it is the main blocker for client-editable production authoring.
+
+### 6.2 Current file-based content
+
+The repository currently stores:
+
+- curated Q&A JSON
+- ASX snapshot input files
+- extracted fund documents under `docs/fund-data/`
+- generated audio/video media under `public/audio` and `public/video`
+
+This is acceptable for a demo artifact repository, but production editing requires moving document and corpus content into managed storage and database-backed workflows.
+
+---
+
+## 7. Target Data Storage
+
+## 7.1 Postgres responsibilities
+
+In the target state, Postgres should store:
+
+- documents and document versions metadata
+- extracted chunk metadata
+- draft Q&A entries
+- editorial state
+- approved corpus entries
+- published corpus versions
+- runtime sessions and turn telemetry
+- audit trails
+
+## 7.2 Object storage responsibilities
+
+Object storage should store:
+
+- uploaded source documents
+- extracted text artifacts when needed
+- optional turn audio retention artifacts
+- optional compiled corpus artifacts if stored outside Postgres
+
+## 7.3 Cache responsibilities
+
+Redis or equivalent cache should hold:
+
+- active published corpus artifact
+- distributed rate-limit counters
+- optional hot session state
+- publish invalidation signals
+
+Runtime must not depend on cold Postgres reads for every answer lookup if low latency is a hard requirement.
+
+---
+
+## 8. Background Jobs and Queues
+
+The current codebase has no general-purpose background job infrastructure. Production authoring requires it.
+
+Suggested job families:
+
+- `document.extract`
+- `document.chunk`
+- `draft-qa.generate`
+- `draft-qa.generate-variants`
+- `corpus.publish.compile`
+- `corpus.publish.cache-warm`
+- `telemetry.aggregate`
+
+Suggested execution pattern:
+
+- application API enqueues work
+- worker process executes work
+- job state is persisted
+- admin UI polls or subscribes to progress
+
+This keeps slow LLM/document tasks out of synchronous runtime requests.
+
+---
+
+## 9. Networking and Request Paths
+
+### 9.1 Current public request paths
+
+Current public routes:
+
+- `GET /api/v1/screen/snapshot`
+- `POST /api/v1/screen/apply-filter`
+- `POST /api/v1/screen/stock-fact`
+- `POST /api/v1/screen/portfolio-overlap`
+- `POST /api/v1/screen/process`
+- `POST /api/v1/demo/tavus`
+- `DELETE /api/v1/demo/tavus/[conversationId]`
+
+### 9.2 Target runtime request path
+
+The target runtime should collapse the public turn flow into:
+
+- `POST /api/runtime/turn`
+
+Auxiliary runtime routes may remain for bootstrap/session setup, but the turn path should be singular and server-owned.
+
+### 9.3 Target admin request path
+
+The target authoring plane should be exposed through authenticated admin APIs under a distinct namespace, for example:
+
+- `/api/admin/documents/*`
+- `/api/admin/drafts/*`
+- `/api/admin/corpus/*`
+
+---
+
+## 10. Rate Limiting
+
+### 10.1 Current state
+
+Current rate limiting is implemented in `src/server/rate-limit.ts` as:
+
+- in-memory
+- per-process
+- sliding-window
+- suitable for demo spend protection
+
+This is currently wired into:
+
+- `POST /api/v1/screen/process`
+- `POST /api/v1/demo/tavus`
+- `DELETE /api/v1/demo/tavus/[conversationId]`
+
+### 10.2 Target state
+
+Production rate limiting should move to a distributed implementation:
+
+- Redis-backed counters or vendor-managed edge limits
+- separate policies for anonymous runtime users and authenticated admins
+- burst and sustained limits
+- cost-aware controls for STT/Tavus-heavy paths
+
+---
+
+## 11. Deployment Model
+
+## 11.1 Current deployment
+
+The current application can be deployed as a single Next.js project with environment variables and DB connectivity.
+
+Current supporting scripts and infrastructure include:
+
+- `scripts/run-migration.ts`
+- `scripts/ingest-asx-snapshot.ts`
+- `scripts/create-tavus-echo-persona.ts`
+- `cdk/` media helper infrastructure
+
+## 11.2 Target deployment shape
+
+The recommended production deployment remains modest:
+
+- one web application deployment
+- one worker deployment
+- one Postgres database
+- one object storage bucket
+- one Redis/cache service
+- observability service(s)
+
+This avoids premature microservice complexity while supporting the needed workloads.
+
+---
+
+## 12. Observability and Operations
+
+### 12.1 Current state
+
+Current observability is mostly:
+
+- structured application logs via `src/lib/logger.ts`
+- `traceId` propagation through routes and error envelopes
+- startup environment validation via `instrumentation.ts`
+
+This is a good start, but it is not yet a full operational platform.
+
+### 12.2 Target state
+
+Production observability should add:
+
+- runtime turn latency metrics
+- STT/classifier/Tavus vendor timing breakdowns
+- publish job metrics
+- job failure alerts
+- audit dashboards
+- distributed traces across runtime turns and jobs
+
+Suggested key metrics:
+
+- runtime turn total latency
+- STT latency
+- classifier fallback rate
+- answer-match confidence / clarification rate
+- Tavus init failure rate
+- publish duration
+- draft generation error rate
+
+---
+
+## 13. Security Posture
+
+### 13.1 Current state
+
+Current security boundaries:
+
+- public demo routes are intentionally unauthenticated
+- authenticated app routes use Supabase cookie/Bearer auth
+- RLS is used on user-domain tables
+- third-party API keys remain server-side
+
+### 13.2 Target state
+
+Production authoring introduces stronger requirements:
+
+- admin role enforcement
+- document access control per tenant/client
+- audit log for editorial and publishing actions
+- stronger secret rotation discipline
+- validation and malware scanning for uploads if required by policy
+
+---
+
+## 14. Testing and Environment Discipline
+
+### 14.1 Current state
+
+The current test harness is partially environment-coupled:
+
+- `vitest.config.ts` loads `.env.local`
+- some route/provider suites run when `DATABASE_URL` is present
+- a developer environment can therefore accidentally run tests against an unavailable external DB
+
+This is a documentation-relevant fact because it affects CI design and reliability.
+
+### 14.2 Target state
+
+The production platform should standardize on:
+
+- hermetic unit tests
+- isolated test DB for integration tests
+- background job test harness
+- deploy-time smoke checks
+- environment-specific runtime health checks
+
+---
+
+## 15. Production Readiness Summary
+
+### Current infrastructure readiness
+
+The current codebase is suitable for:
+
+- demos
+- internal pilots
+- controlled proof-of-concept usage
+
+### Target infrastructure readiness
+
+To support a client-editable, production-quality product, the platform must add:
+
+- authoring storage model
+- background jobs
+- published corpus versioning
+- distributed cache/rate limiting
+- stronger observability
+- admin authorization model
+
+That target is covered by the implementation phases in [plans/production-modernization-plan.md](./plans/production-modernization-plan.md).
